@@ -1,0 +1,13 @@
+/usr/include
+/usr/local/cuda/include
+/opt/intel/composer_xe_2011_sp1.7.256/ipp/include
+
+/home/imara/Projects/libStereoCUDA/include/homest-1.3
+/home/imara/Projects/libStereoCUDA/include/matclpro
+/home/imara/Projects/libStereoCUDA/include/levmar-2.4
+
+/home/imara/Projects/libStereoCUDA
+
+/home/imara/NVIDIA_GPU_Computing_SDK/C/common/inc/
+
+/usr/include/opencv2
