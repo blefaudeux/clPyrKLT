@@ -1,0 +1,12 @@
+#ifndef LIBCLKLT_GLOBAL_H
+#define LIBCLKLT_GLOBAL_H
+
+#include <QtCore/qglobal.h>
+
+#if defined(LIBCLKLT_LIBRARY)
+#  define LIBCLKLTSHARED_EXPORT Q_DECL_EXPORT
+#else
+#  define LIBCLKLTSHARED_EXPORT Q_DECL_IMPORT
+#endif
+
+#endif // LIBCLKLT_GLOBAL_H
