@@ -38,7 +38,7 @@ texture <float, 2, cudaReadModeElementType> texRef_pyramid_prev;
 texture <float, 2, cudaReadModeElementType> texRef_pyramid_cur;
 
 // Image pyramids -> texture buffers
-texture <float, 2, cudaReadModeElementType> gpu_textr_pict_0;     // This will keep all the pictures in the texture space
+texture <float, 2, cudaReadModeElementType> gpu_textr_pict_0;   // This will keep all the pictures in the texture space
 texture <float, 2, cudaReadModeElementType> gpu_textr_pict_1;
 
 texture <float, 2, cudaReadModeElementType> gpu_textr_deriv_x;  // This will keep all the gradients in the texture space
@@ -67,7 +67,7 @@ __constant__ __device__ int   LK_win_size;
 
 
 // Possible weight coefficients for tracking cost evaluation :
-// gaussian discretisation
+// Gaussian discretisation
 /*
  *
  *       1  4  6  4  1

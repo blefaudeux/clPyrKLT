@@ -1,13 +1,18 @@
 #ifndef LIBCLKLT_H
 #define LIBCLKLT_H
 
-#include "libclklt_global.h"
+#include <iostream>
+#include <CL/cl.hpp>
 
-class LIBCLKLTSHARED_EXPORT LibClKLT
-{
-  
-public:
-  LibClKLT();
+class LibClKLT  {
+  private:
+    bool allocate_memory();
+    bool release_memory();
+
+  public:
+    LibClKLT();
+
+
 };
 
 #endif // LIBCLKLT_H
