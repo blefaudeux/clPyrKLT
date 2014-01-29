@@ -7,14 +7,15 @@
 QT       -= core gui
 
 TARGET = libClKLT
+
 TEMPLATE = lib
 
 DEFINES += LIBCLKLT_LIBRARY
 
-SOURCES += libclklt.cpp
+SOURCES += libclklt.cpp \
+    kernel_code.cl
 
-HEADERS += libclklt.h\
-        libclklt_global.h
+HEADERS += libclklt.h
 
 QMAKE_CXXFLAGS += -std=c++0x
 
