@@ -33,8 +33,8 @@ if( CMAKE_BUILD_TYPE MATCHES "[Rr][Ee][Ll][Ee][Aa][Ss][Ee]" )
 endif()
 
 # Create static and dynamic libraries
-add_library (ClKLT_static STATIC ${SRC} ${HEADERS})
-add_library (ClKLT_dynamic SHARED ${SRC} ${HEADERS})
+add_library (ClKLT_static STATIC ${SRC} ${SRC_CL} ${HEADERS})
+add_library (ClKLT_dynamic SHARED ${SRC} ${SRC_CL} ${HEADERS})
 
 # Set the link libraries :
 TARGET_LINK_LIBRARIES(ClKLT_static ${Boost_LIBRARIES} )
