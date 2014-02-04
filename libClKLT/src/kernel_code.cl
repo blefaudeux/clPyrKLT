@@ -324,18 +324,17 @@ __kernel void compute_spatial_grad( __global const float  *coord_gpu,
 
   int idx = get_global_id(0);
 
-  if (idx >= LK_points)
-  return;
+  if (idx >= LK_points) return;
 
   float x_pt = coord_gpu[2*idx];
   float y_pt = coord_gpu[2*idx+1];
 
   if(x_pt > (LK_width-1) ||
-  y_pt > (LK_height-1)) // Useful check ?
-  return;
+    y_pt > (LK_height-1)) // Useful check ?
 
-  if(status_gpu[idx] == 0)
-  return;
+return;
+
+  if(status_gpu[idx] == 0) return;
 
   x_pt *= LK_scaling;
   y_pt *= LK_scaling;

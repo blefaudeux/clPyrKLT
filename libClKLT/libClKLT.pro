@@ -12,10 +12,12 @@ TEMPLATE = lib
 
 DEFINES += LIBCLKLT_LIBRARY
 
-SOURCES += libclklt.cpp \
-    kernel_code.cl
+SOURCES += src/libclklt.cpp \
+    src/kernel_code.cl
 
-HEADERS += libclklt.h
+HEADERS += headers/libclklt.h
+
+INCLUDEPATH +=headers
 
 QMAKE_CXXFLAGS += -std=c++0x
 
