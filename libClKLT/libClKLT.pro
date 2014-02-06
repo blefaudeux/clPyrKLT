@@ -12,10 +12,12 @@ TEMPLATE = lib
 
 DEFINES += LIBCLKLT_LIBRARY
 
-SOURCES += src/libclklt.cpp \
-    src/kernel_code.cl
+SOURCES += \
+    src/kernel_code.cl \
+    src/clklt.cpp
 
-HEADERS += headers/libclklt.h
+HEADERS += \
+    headers/clklt.h
 
 INCLUDEPATH +=headers
 

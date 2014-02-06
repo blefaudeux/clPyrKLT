@@ -19,16 +19,20 @@ __constant sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_T
 
 
 // Convert RGB Picture to grey/float
-__kernel void convertRGBToGrey(unsigned char *d_in, float *d_out, int N)
+__kernel void convertRGBToGrey(__global const unsigned char *d_in,
+                               __global float *d_out,
+                               int N)
 {
 int idx = get_global_id(0);
 
   if(idx < N)
-  d_out[idx] = d_in[idx*3]*0.1144f + d_in[idx*3+1]*0.5867f + d_in[idx*3+2]*0.2989f;
+    d_out[idx] = d_in[idx*3]*0.1144f + d_in[idx*3+1]*0.5867f + d_in[idx*3+2]*0.2989f;
   }
 
 // Convert Grey uchar picture to float
-__kernel void convertGreyToFloat(unsigned char *d_in, float *d_out, int N)
+__kernel void convertGreyToFloat(__global const unsigned char *d_in,
+                                 __global float *d_out,
+                                 int N)
 {
 int idx = get_group_id(0)*get_num_groups(0) + get_local_id;
 
@@ -37,7 +41,9 @@ int idx = get_group_id(0)*get_num_groups(0) + get_local_id;
   }
 
 // Downsample picture to build pyramid lower level (naive implementation..)
-__kernel void pyrDownsample(float *in, int w1, int h1, float *out, int w2, int h2)
+__kernel void pyrDownsample(__global const float *in,
+                            int w1, int h1,
+                            __global float *out, int w2, int h2)
 {
 // Input has to be greyscale
 int x2 = get_global_id(0);
@@ -60,7 +66,6 @@ int y2 = get_global_id(1);
       //     Initial extrapolation pattern 1/4 1/8 1/16
       out[y2*w2 + x2] = 0.25f*in[y*w1+x] + 0.125f*(in[y*w1+x_1] + in[y*w1+x_2] + in[y_1*w1+x] + in[y_2*w1+x]) +
       0.0625f*(in[y_1*w1+x_1] + in[y_2*w1+x_1] + in[y_1*w1+x_2] + in[y_2*w1+x_2]);
-      {
       // OpenCV extrapolation pattern :
       //    out[y2*w2 + x2] = 0.375f*in[y*w1+x] + 0.25f*(in[y*w1+x_1] + in[y*w1+x_2] + in[y_1*w1+x] + in[y_2*w1+x]) +
       //        0.0625f*(in[y_1*w1+x_1] + in[y_2*w1+x_1] + in[y_1*w1+x_2] + in[y_2*w1+x_2]);
@@ -70,11 +75,11 @@ int y2 = get_global_id(1);
         //        0.03846f*(in[y_1*w1+x_1] + in[y_2*w1+x_1] + in[y_1*w1+x_2] + in[y_2*w1+x_2]);
         }
         }
-        }
 
 
 // Upsample a picture using the "magic" kernel
-__kernel void kernelMagicUpsampleX(float *in, int _w, int _h, float *out) {
+__kernel void kernelMagicUpsampleX(__global const float *in, int _w, int _h,
+                                  __global float *out) {
 // Coefficients : 1/4, 3/4, 3/4, 1/4 in each direction (doubles the size of the picture)
 
   int x = get_global_id(0);
@@ -105,7 +110,7 @@ __global__ void kernelDiffOperator(float *in, int w, int h, float *out) {
 */
 
 // Compute spatial derivatives using Scharr operator - Naive implementation..
-__kernel void kernelScharrX(const float *in, int _w, int _h, float *out) {
+__kernel void kernelScharrX(__global const float *in, int _w, int _h, __global float *out) {
 // Pattern : // Indexes :
 // -3 -10 -3 // a1 b1 c1
 //  0   0  0 // a2 b2 c2
@@ -142,7 +147,7 @@ __kernel void kernelScharrX(const float *in, int _w, int _h, float *out) {
   }
 
 // Compute spatial derivatives using Scharr operator - Naive implementation..
-__kernel void kernelScharrY(const float *in, int _w, int _h, float *out) {
+__kernel void kernelScharrY(__global const float *in, int _w, int _h, __global float *out) {
 int x = get_global_id(0);
 int y = get_global_id(1);
 
@@ -176,7 +181,7 @@ int y = get_global_id(1);
   }
 
 // Compute spatial derivatives using Sobel operator - Naive implementation..
-__kernel void kernelSobelX(const float *in, int _w, int _h, float *out) {
+__kernel void kernelSobelX(__global const float *in, int _w, int _h, __global float *out) {
 // Pattern : // Indexes :
 // -1 -2 -1 // a1 b1 c1
 //  0  0  0 // a2 b2 c2
@@ -213,9 +218,9 @@ __kernel void kernelSobelX(const float *in, int _w, int _h, float *out) {
 
 // Compute spatial derivatives using Scharr operator - Naive implementation..
 __kernel void kernelSobelY(__global const float *in,
-int _w,
-int _h,
-__global float *out) {
+                            int _w,
+                            int _h,
+                            __global float *out) {
 
   int x = get_global_id(0);
   int y = get_global_id(1);
@@ -267,8 +272,8 @@ __kernel void kernelSmoothX(__global const float *in,
                             int w, int h,
                             __global float *out)
 {
-int x = get_global_id(0);
-int y = get_global_id(1);
+  int x = get_global_id(0);
+  int y = get_global_id(1);
 
   if(x >= w || y >= h)
   return;
@@ -294,8 +299,8 @@ __kernel void kernelSmoothY(__global float *in,
                             int w, int h,
                             __global float *out)
 {
-int x = get_global_id(0);
-int y = get_global_id(1);
+  int x = get_global_id(0);
+  int y = get_global_id(1);
 
   if(x >= w || y >= h)
   return;
@@ -312,7 +317,7 @@ int y = get_global_id(1);
   if(e >= h) e = h-1;
 
   out[y*w+x] = 0.0625f*in[a*w+x] + 0.25f*in[b*w+x] + 0.375f*in[c*w+x] + 0.25f*in[d*w+x] + 0.0625f*in[e*w+x];
-  }
+}
 
 
 __kernel void compute_spatial_grad( __global const float  *coord_gpu,
@@ -330,7 +335,7 @@ __kernel void compute_spatial_grad( __global const float  *coord_gpu,
   float y_pt = coord_gpu[2*idx+1];
 
   if(x_pt > (LK_width-1) ||
-    y_pt > (LK_height-1)) // Useful check ?
+  y_pt > (LK_height-1)) // Useful check ?
 
 return;
 
@@ -345,16 +350,15 @@ return;
   // TODO : offset the coordinate to access derivatives array
 
   for(yy=-LK_patch; yy <= LK_patch; ++yy) {
-  for(xx=-LK_win_size; xx <= LK_win_size; ++xx) {
+    for(xx=-LK_win_size; xx <= LK_win_size; ++xx) {
+      Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
+      Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
 
-          Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
-          Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
-
-          sum_Ixx += Ix * Ix;
-          sum_Ixy += Ix * Iy;
-          sum_Iyy += Iy * Iy;
-          }
-          }
+      sum_Ixx += Ix * Ix;
+      sum_Ixy += Ix * Iy;
+      sum_Iyy += Iy * Iy;
+    }
+  }
 
   gpu_neighbourhood_det[idx] = sum_Ixx*sum_Iyy - sum_Ixy*sum_Ixy;
   gpu_neighbourhood_Iyy[idx] = sum_Iyy;
@@ -386,8 +390,8 @@ int idx = get_global_id(0);
   float x_pt = coord_gpu[2*idx];
   float y_pt = coord_gpu[2*idx+1];
 
-  if(x_pt > (LK_width-1) ||
-  y_pt > (LK_height-1))
+  if (x_pt > (LK_width-1) ||
+      y_pt > (LK_height-1))
   return;
 
   if(status_gpu[idx] == 0)
@@ -405,73 +409,71 @@ int idx = get_global_id(0);
   y_pt *= LK_scaling;
 
   if(LK_init_guess) {
-  Vx = 0.f;
-  Vy = 0.f;
-  cur_x = x_pt;
-  cur_y = y_pt;
+    Vx = 0.f;
+    Vy = 0.f;
+    cur_x = x_pt;
+    cur_y = y_pt;
   }
   else {
-  Vx = dx_gpu[idx];
-  Vy = dy_gpu[idx];
-  cur_x = x_pt + Vx;
-  cur_y = y_pt + Vy;
+    Vx = dx_gpu[idx];
+    Vy = dy_gpu[idx];
+    cur_x = x_pt + Vx;
+    cur_y = y_pt + Vy;
   }
 
   // Iteration part
   for(j=0; j < LK_iteration; ++j) {
-  // If current speed vector drives the point out of bounds
-  if(cur_x < 0.f ||
-  cur_x > LK_pyr_w ||
-  cur_y < 0.f ||
-  cur_y > LK_pyr_h) {
+    // If current speed vector drives the point out of bounds
+    if (cur_x < 0.f || cur_x > LK_pyr_w ||
+        cur_y < 0.f || cur_y > LK_pyr_h) {
 
-          dx_gpu[idx] = 0.f;
-          dy_gpu[idx] = 0.f;
-          status_gpu[idx] = 0;
-          return;
-          }
+      dx_gpu[idx] = 0.f;
+      dy_gpu[idx] = 0.f;
+      status_gpu[idx] = 0;
+      return;
+    }
 
-      sum_Ixt = 0.f;
-      sum_Iyt = 0.f;
+    sum_Ixt = 0.f;
+    sum_Iyt = 0.f;
 
-      // No explicit handling of pixels outside the image
-      // Texture fetchs ensure calls are clamped to window size
-      for(yy=-LK_patch; yy <= LK_patch; ++yy) {
+    // No explicit handling of pixels outside the image
+    // Texture fetchs ensure calls are clamped to window size
+    for(yy=-LK_patch; yy <= LK_patch; ++yy) {
       for(xx=-LK_win_size; xx <= LK_win_size; ++xx) {
-      It = tex2D(gpu_textr_pict_1, cur_x + LK_width_offset + xx, cur_y + yy)
-      - tex2D(gpu_textr_pict_0, x_pt + LK_width_offset + xx, y_pt + yy);
+        It = tex2D(gpu_textr_pict_1, cur_x + LK_width_offset + xx, cur_y + yy)
+        - tex2D(gpu_textr_pict_0, x_pt + LK_width_offset + xx, y_pt + yy);
 
-              Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
-              Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
+                Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
+                Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
 
-              sum_Ixt += Ix*It;
-              sum_Iyt += Iy*It;
-              }
-              }
+                sum_Ixt += Ix*It;
+                sum_Iyt += Iy*It;
+       }
+    }
 
-      // Find the inverse of the 2x2 matrix using a mix of determinant and adjugate matrix
-      // http://cnx.org/content/m19446/latest/
-      vx = __fdividef((- gpu_neighbourhood_Iyy[idx] * sum_Ixt +
-      gpu_neighbourhood_Ixy[idx] * sum_Iyt), gpu_neighbourhood_det[idx]);
+    // Find the inverse of the 2x2 matrix using a mix of determinant and adjugate matrix
+    // http://cnx.org/content/m19446/latest/
+    vx = __fdividef((- gpu_neighbourhood_Iyy[idx] * sum_Ixt +
+    gpu_neighbourhood_Ixy[idx] * sum_Iyt), gpu_neighbourhood_det[idx]);
 
-      vy = __fdividef(( gpu_neighbourhood_Ixy[idx] * sum_Ixt -
-      gpu_neighbourhood_Ixx[idx] * sum_Iyt), gpu_neighbourhood_det[idx]);
+    vy = __fdividef(( gpu_neighbourhood_Ixy[idx] * sum_Ixt -
+    gpu_neighbourhood_Ixx[idx] * sum_Iyt), gpu_neighbourhood_det[idx]);
 
-      Vx += vx;
-      Vy += vy;
-      cur_x += vx;
-      cur_y += vy;
+    Vx += vx;
+    Vy += vy;
+    cur_x += vx;
+    cur_y += vy;
 
-      // Stop if movement is very small
-      if(fabsf(vx) < LK_threshold &&
+    // Stop if movement is very small
+    if(fabsf(vx) < LK_threshold &&
       fabsf(vy) < LK_threshold)
       break;
-      }
+  }
 
   // Double speed vector to get to next scale
   if(LK_pyr_level != 0) {
-  Vx += Vx;
-  Vy += Vy;
+    Vx += Vx;
+    Vy += Vy;
   }
 
   dx_gpu[idx] = Vx;
@@ -481,7 +483,7 @@ int idx = get_global_id(0);
   if (LK_pyr_level == 0) {
     coord_gpu[2*idx  ] -= Vx;
     coord_gpu[2*idx+1] -= Vy;
-    }
+  }
 }
 
 // Kernel to compute the tracking
@@ -489,9 +491,9 @@ __kernel void track_pts_weighted( __global float *coord_gpu,
                                   __global float *dx_gpu,
                                   __global float *dy_gpu,
                                   __global char  *status_gpu,
-                                  bool  rectified)
-{
-int idx = get_global_id(0); // "2D" indexing
+                                  bool  rectified)  {
+
+  int idx = get_global_id(0); // "2D" indexing
 
   if (idx >= LK_points)
   return;
@@ -500,7 +502,7 @@ int idx = get_global_id(0); // "2D" indexing
   float y_pt = coord_gpu[2*idx+1];
 
   if(x_pt > (LK_width-1) ||
-  y_pt > (LK_height-1)) // Useful check ?
+    y_pt > (LK_height-1)) // Useful check ?
   return;
 
   if(status_gpu[idx] == 0)
@@ -540,25 +542,24 @@ int idx = get_global_id(0); // "2D" indexing
   int win_size;
 
   if (rectified) {
-  win_size = 2;
+    win_size = 2;
   } else {
-  win_size = LK_patch;
+    win_size = LK_patch;
   }
 
   for(yy=-win_size; yy <= win_size; ++yy) {
-  for(xx=-LK_patch; xx <= LK_patch; ++xx) {
+    for(xx=-LK_patch; xx <= LK_patch; ++xx) {
+      temp_weight = LK_Weight[(int)(yy + xx*LK_patch)];
+      temp_weight *= temp_weight;
 
-          temp_weight = LK_Weight[(int)(yy + xx*LK_patch)];
-          temp_weight *= temp_weight;
+      Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
+      Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
 
-          Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
-          Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
-
-          sum_Ixx += Ix * Ix * temp_weight;
-          sum_Ixy += Ix * Iy * temp_weight;
-          sum_Iyy += Iy * Iy * temp_weight;
-          }
-          }
+      sum_Ixx += Ix * Ix * temp_weight;
+      sum_Ixy += Ix * Iy * temp_weight;
+      sum_Iyy += Iy * Iy * temp_weight;
+      }
+    }
 
   det = sum_Ixx*sum_Iyy - sum_Ixy*sum_Ixy;
 
@@ -569,57 +570,55 @@ int idx = get_global_id(0); // "2D" indexing
   }
 
   // Iteration part
-  for(j=0; j < LK_iteration; ++j) {
-  // If current speed vector drives the point out of bounds
-  if(cur_x < 0.f ||
-  cur_x > LK_pyr_w ||
-  cur_y < 0.f ||
-  cur_y > LK_pyr_h) {
-  status_gpu[idx] = 0;
-  return;
+  for (j=0; j < LK_iteration; ++j) {
+    // If current speed vector drives the point out of bounds
+    if (cur_x < 0.f || cur_x > LK_pyr_w ||
+        cur_y < 0.f   ||  cur_y > LK_pyr_h) {
+      status_gpu[idx] = 0;
+    return;
   }
 
-      sum_Ixt = 0.f;
-      sum_Iyt = 0.f;
+  sum_Ixt = 0.f;
+  sum_Iyt = 0.f;
 
-      // No explicit handling of pixels outside the image
-      // Texture fetchs ensure calls are clamped to window size
-      for(yy=-win_size; yy <= win_size; ++yy) {
-      for(xx=-LK_patch; xx <= LK_patch; ++xx) {
+  // No explicit handling of pixels outside the image
+  // Texture fetchs ensure calls are clamped to window size
+  for(yy=-win_size; yy <= win_size; ++yy) {
+    for(xx=-LK_patch; xx <= LK_patch; ++xx) {
       It = tex2D(gpu_textr_pict_1, cur_x + LK_width_offset + xx, cur_y + yy)
-      - tex2D(gpu_textr_pict_0, x_pt + LK_width_offset + xx, y_pt + yy);
+          - tex2D(gpu_textr_pict_0, x_pt + LK_width_offset + xx, y_pt + yy);
 
-              temp_weight = LK_Weight[(int)(yy + xx*LK_patch)];
-              temp_weight *= temp_weight;
+      temp_weight = LK_Weight[(int)(yy + xx*LK_patch)];
+      temp_weight *= temp_weight;
 
-              Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
-              Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
+      Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
+      Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
 
-              sum_Ixt += Ix * It * temp_weight;
-              sum_Iyt += Iy * It * temp_weight;
-              }
-              }
+      sum_Ixt += Ix * It * temp_weight;
+      sum_Iyt += Iy * It * temp_weight;
+    }
+  }
 
-      // Find the inverse of the 2x2 matrix using a mix of determinant and adjugate matrix
-      // http://cnx.org/content/m19446/latest/
-      vx = __fdividef((-sum_Iyy*sum_Ixt + sum_Ixy*sum_Iyt), det);
-      vy = __fdividef(( sum_Ixy*sum_Ixt - sum_Ixx*sum_Iyt), det);
+  // Find the inverse of the 2x2 matrix using a mix of determinant and adjugate matrix
+  // http://cnx.org/content/m19446/latest/
+  vx = __fdividef((-sum_Iyy*sum_Ixt + sum_Ixy*sum_Iyt), det);
+  vy = __fdividef(( sum_Ixy*sum_Ixt - sum_Ixx*sum_Iyt), det);
 
-      Vx += vx;
-      Vy += vy;
-      cur_x += vx;
-      cur_y += vy;
+  Vx += vx;
+  Vy += vy;
+  cur_x += vx;
+  cur_y += vy;
 
-      // Stop if movement is very small
-      if(fabsf(vx) < LK_threshold &&
-      fabsf(vy) < LK_threshold)
-      break;
-      }
+  // Stop if movement is very small
+  if(fabsf(vx) < LK_threshold &&
+    fabsf(vy) < LK_threshold)
+    break;
+  }
 
   // Double speed vector to get to next scale
   if(LK_pyr_level != 0) {
-  Vx += Vx;
-  Vy += Vy;
+    Vx += Vx;
+    Vy += Vy;
   }
 
   dx_gpu[idx] = Vx;
@@ -627,7 +626,7 @@ int idx = get_global_id(0); // "2D" indexing
 
   // Shift coordinates of the points to track
   if (LK_pyr_level == 0) {
-  coord_gpu[2*idx  ] -= Vx;
-  coord_gpu[2*idx+1] -= Vy;
+    coord_gpu[2*idx  ] -= Vx;
+    coord_gpu[2*idx+1] -= Vy;
   }
 }

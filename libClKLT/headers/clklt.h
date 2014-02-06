@@ -11,8 +11,12 @@
 
 class ClKLT  {
   private:
-    bool AllocateMemory();
-    bool ReleaseMemory();
+    bool allocateMemory();
+    bool releaseMemory();
+
+    bool b_mem_allocated;
+
+    unsigned int _size_x, _size_y, _max_points;
 
     cl_context context;                 /**< CL context */
     cl_device_id *devices;              /**< CL device list */
@@ -20,36 +24,26 @@ class ClKLT  {
     cl_mem gpu_img_prev_RGB;
     cl_mem gpu_img_cur_RGB;
 
-    // 4-Frame tracking
-    cl_uchar4 *gpu_img_prev1_RGB;
-    cl_uchar4 *gpu_img_prev2_RGB;
-
-    cl_uchar4 *gpu_img_cur1_RGB;
-    cl_uchar4 *gpu_img_cur2_RGB;
+    // Features buffers
+    void *initial_pose, *next_pose, *status;
 
     // Picture buffers
-    cl_mem *gpu_img_pyramid_prev1[LEVELS];
-    cl_mem *gpu_img_pyramid_prev2[LEVELS];
-    cl_mem *gpu_img_pyramid_cur1[LEVELS];
-    cl_mem *gpu_img_pyramid_cur2[LEVELS];
+    cl_image_desc pict_params;
 
-    cl_mem *gpu_sobel_prev1;
-    cl_mem *gpu_sobel_prev2;
-    cl_mem *gpu_sobel_cur1;
-    cl_mem *gpu_sobel_cur2;
+    cl_uchar4 *gpu_img_prev_RGB;
+    cl_uchar4 *gpu_img_cur_RGB;
 
-    cl_mem *buff1;
-    cl_mem *buff2;
+    cl_mem *gpu_img_pyramid_prev[LEVELS];
+    cl_mem *gpu_img_pyramid_cur[LEVELS];
 
-    cl_mem *gpu_smoothed_prev1_x;
-    cl_mem *gpu_smoothed_prev2_x;
-    cl_mem *gpu_smoothed_cur1_x;
-    cl_mem *gpu_smoothed_cur2_x;
+    cl_mem *gpu_sobel_prev;
+    cl_mem *gpu_sobel_cur;
 
-    cl_mem *gpu_smoothed_prev1;
-    cl_mem *gpu_smoothed_prev2;
-    cl_mem *gpu_smoothed_cur1;
-    cl_mem *gpu_smoothed_cur2;
+    cl_mem *gpu_smoothed_prev_x;
+    cl_mem *gpu_smoothed_cur_x;
+
+    cl_mem *gpu_smoothed_prev;
+    cl_mem *gpu_smoothed_cur;
 
     cl_mem *gpu_deriv_x;
     cl_mem *gpu_deriv_y;
@@ -62,6 +56,16 @@ class ClKLT  {
   public:
     ClKLT();
     ~ClKLT();
+
+    /*!
+     * \brief newFrame
+     * \param data
+     * \param size_x
+     * \param size_y
+     */
+    void newFrame(unsigned char *data,
+                  int _size_x,
+                  int _size_y) ;
 
 };
 
