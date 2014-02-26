@@ -1,4 +1,3 @@
-
 __constant __global int   LK_iteration;
 __constant __global int   LK_patch;
 __constant __global int   LK_points;
@@ -23,78 +22,71 @@ __kernel void convertRGBToGrey(__global const unsigned char *d_in,
                                __global float *d_out,
                                int N)
 {
-int idx = get_global_id(0);
+  int idx = get_global_id(0);
 
   if(idx < N)
     d_out[idx] = d_in[idx*3]*0.1144f + d_in[idx*3+1]*0.5867f + d_in[idx*3+2]*0.2989f;
-  }
+}
 
 // Convert Grey uchar picture to float
 __kernel void convertGreyToFloat(__global const unsigned char *d_in,
                                  __global float *d_out,
                                  int N)
 {
-int idx = get_group_id(0)*get_num_groups(0) + get_local_id;
+  int idx = get_group_id(0)*get_num_groups(0) + get_local_id;
 
   if(idx < N)
-  d_out[idx] = __fdividef((float) d_in[idx], 254.0);
-  }
+  d_out[idx] = native_divide((float) d_in[idx], 254.0);
+}
 
 // Downsample picture to build pyramid lower level (naive implementation..)
 __kernel void pyrDownsample(__global const float *in,
                             int w1, int h1,
                             __global float *out, int w2, int h2)
 {
-// Input has to be greyscale
-int x2 = get_global_id(0);
-int y2 = get_global_id(1);
+  // Input has to be greyscale
+  int x2 = get_global_id(0);
+  int y2 = get_global_id(1);
 
   if( (x2 < w2) && (y2 < h2) ) {
-  int x = x2*2;
-  int y = y2*2;
-  int x_1 = x-1;
-  int y_1 = y-1;
-  int x_2 = x+1;
-  int y_2 = y+1;
+    int x = x2*2;
+    int y = y2*2;
+    int x_1 = x-1;
+    int y_1 = y-1;
+    int x_2 = x+1;
+    int y_2 = y+1;
 
-      // Pad values
-      if(x_1 < 0) x_1 = 0;
-      if(y_1 < 0) y_1 = 0;
-      if(x_2 >= w1) x_2 = w1 - 1;
-      if(y_2 >= h1) y_2 = h1 - 1;
+    // Pad values
+    if(x_1 < 0) x_1 = 0;
+    if(y_1 < 0) y_1 = 0;
+    if(x_2 >= w1) x_2 = w1 - 1;
+    if(y_2 >= h1) y_2 = h1 - 1;
 
-      //     Initial extrapolation pattern 1/4 1/8 1/16
-      out[y2*w2 + x2] = 0.25f*in[y*w1+x] + 0.125f*(in[y*w1+x_1] + in[y*w1+x_2] + in[y_1*w1+x] + in[y_2*w1+x]) +
-      0.0625f*(in[y_1*w1+x_1] + in[y_2*w1+x_1] + in[y_1*w1+x_2] + in[y_2*w1+x_2]);
-      // OpenCV extrapolation pattern :
-      //    out[y2*w2 + x2] = 0.375f*in[y*w1+x] + 0.25f*(in[y*w1+x_1] + in[y*w1+x_2] + in[y_1*w1+x] + in[y_2*w1+x]) +
-      //        0.0625f*(in[y_1*w1+x_1] + in[y_2*w1+x_1] + in[y_1*w1+x_2] + in[y_2*w1+x_2]);
-
-        //    // Another trial to improve interpolation pattern..
-        //    out[y2*w2 + x2] = 0.23077f*in[y*w1+x] + 0.15385f*(in[y*w1+x_1] + in[y*w1+x_2] + in[y_1*w1+x] + in[y_2*w1+x]) +
-        //        0.03846f*(in[y_1*w1+x_1] + in[y_2*w1+x_1] + in[y_1*w1+x_2] + in[y_2*w1+x_2]);
-        }
-        }
+    //     Initial extrapolation pattern 1/4 1/8 1/16
+    out[y2*w2 + x2] = 0.25f*in[y*w1+x] + 0.125f*(in[y*w1+x_1] + in[y*w1+x_2] + in[y_1*w1+x] + in[y_2*w1+x]) +
+                      0.0625f*(in[y_1*w1+x_1] + in[y_2*w1+x_1] + in[y_1*w1+x_2] + in[y_2*w1+x_2]);
+  }
+}
 
 
 // Upsample a picture using the "magic" kernel
 __kernel void kernelMagicUpsampleX(__global const float *in, int _w, int _h,
-                                  __global float *out) {
-// Coefficients : 1/4, 3/4, 3/4, 1/4 in each direction (doubles the size of the picture)
+                                    __global float *out)
+{
+  // Coefficients : 1/4, 3/4, 3/4, 1/4 in each direction (doubles the size of the picture)
 
   int x = get_global_id(0);
   int y = get_global_id(1);
 
   if(x >= _w || y >= _h)
-  return;
+    return;
 
   // Duplicate the points at the same place (?)
   out[y*2*_w + 2*x] = in[y*_w+x];
 
 
   if ((x < (_w-2)) && (x > 1))
-  out[y*2*_w + 2*x + 1] = __fdividef(3.0*(in[y*_w+x] + in[y*_w + x + 1]) + in[y*_w+x -1] + in[y*_w+x +2] , 8.0);
-
+    out[y*2*_w + 2*x + 1] = native_divide(3.0*(in[y*_w+x] + in[y*_w + x + 1]) + in[y*_w+x -1] + in[y*_w+x +2] , 8.0);
 }
 
 /*
@@ -142,7 +134,7 @@ __kernel void kernelScharrX(__global const float *in, int _w, int _h, __global f
   c1 = c*_w + i1;
   c3 = c*_w + i3;
 
-  out[y*_w+x] = __fdividef(3.0 * (-in[a1]  -in[c1] + in[a3] + in[c3]) + 10.0 * (in[b3] -in[b1]), 20.0);
+  out[y*_w+x] = native_divide(3.0 * (-in[a1]  -in[c1] + in[a3] + in[c3]) + 10.0 * (in[b3] -in[b1]), 20.0);
   //  out[y*_w+x] = -3.0*in[a1] -10.0*in[b1] -3.0*in[c1] + 3.0*in[a3] + 10.0*in[b3] + 3.0*in[c3];
   }
 
@@ -176,7 +168,7 @@ int y = get_global_id(1);
   c2 = c*_w + x;
   c3 = c*_w + i3;
 
-  out[y*_w+x] = __fdividef(3.0*(- in[a1] -in[a3] +in[c1] +in[c3]) + 10.0*(in[c2] -in[a2]), 20.0);
+  out[y*_w+x] = native_divide(3.0*(- in[a1] -in[a3] +in[c1] +in[c3]) + 10.0*(in[c2] -in[a2]), 20.0);
   //  out[y*_w+x] = -3.0*in[a1] -10.0*in[a2] -3.0*in[a3] + 3.0*in[c1] + 10.0*in[c2] + 3.0*in[c3];
   }
 
@@ -213,7 +205,7 @@ __kernel void kernelSobelX(__global const float *in, int _w, int _h, __global fl
   c1 = c*_w + i1;
   c3 = c*_w + i3;
 
-  out[y*_w+x] = __fdividef(-1.0*in[a1] -2.0*in[b1] -1.0*in[c1] + 1.0*in[a3] + 2.0*in[b3] + 1.0*in[c3], 4.0);
+  out[y*_w+x] = native_divide(-1.0*in[a1] -2.0*in[b1] -1.0*in[c1] + 1.0*in[a3] + 2.0*in[b3] + 1.0*in[c3], 4.0);
   }
 
 // Compute spatial derivatives using Scharr operator - Naive implementation..
@@ -226,7 +218,7 @@ __kernel void kernelSobelY(__global const float *in,
   int y = get_global_id(1);
 
   if(x >= _w || y >= _h)
-  return;
+    return;
 
   // Pattern  // Indexes:
   //  -1 0 1 // a1 b1 c1
@@ -250,8 +242,8 @@ __kernel void kernelSobelY(__global const float *in,
   c2 = c*_w + x;
   c3 = c*_w + i3;
 
-  out[y*_w + x] = __fdividef(-1.0*in[a1] -2.0*in[a2] -1.0*in[a3] + 1.0*in[c1] + 2.0*in[c2] + 1.0*in[c3], 4.0);
-  }
+  out[y*_w + x] = native_divide(-1.0*in[a1] -2.0*in[a2] -1.0*in[a3] + 1.0*in[c1] + 2.0*in[c2] + 1.0*in[c3], 4.0);
+}
 
 __kernel void kernelAdd(__global const float *in1,
                         __global const float *in2,
@@ -262,7 +254,7 @@ __kernel void kernelAdd(__global const float *in1,
   int x = get_global_id(0);
   int y = get_global_id(1);
 
-  out[y*_w + x] = __fsqrt_rn(__fadd_rn(__fmul_rn(in1[y*_w + x],in1[y*_w + x]), __fmul_rn(in2[y*_w + x],in2[y*_w + x])));
+  out[y*_w + x] = native_sqrt(native_add(__fmul_rn(in1[y*_w + x],in1[y*_w + x]), native_mul(in2[y*_w + x],in2[y*_w + x])));
 
 }
 
@@ -453,10 +445,10 @@ int idx = get_global_id(0);
 
     // Find the inverse of the 2x2 matrix using a mix of determinant and adjugate matrix
     // http://cnx.org/content/m19446/latest/
-    vx = __fdividef((- gpu_neighbourhood_Iyy[idx] * sum_Ixt +
+    vx = native_divide((- gpu_neighbourhood_Iyy[idx] * sum_Ixt +
     gpu_neighbourhood_Ixy[idx] * sum_Iyt), gpu_neighbourhood_det[idx]);
 
-    vy = __fdividef(( gpu_neighbourhood_Ixy[idx] * sum_Ixt -
+    vy = native_divide(( gpu_neighbourhood_Ixy[idx] * sum_Ixt -
     gpu_neighbourhood_Ixx[idx] * sum_Iyt), gpu_neighbourhood_det[idx]);
 
     Vx += vx;
@@ -601,8 +593,8 @@ __kernel void track_pts_weighted( __global float *coord_gpu,
 
   // Find the inverse of the 2x2 matrix using a mix of determinant and adjugate matrix
   // http://cnx.org/content/m19446/latest/
-  vx = __fdividef((-sum_Iyy*sum_Ixt + sum_Ixy*sum_Iyt), det);
-  vy = __fdividef(( sum_Ixy*sum_Ixt - sum_Ixx*sum_Iyt), det);
+  vx = native_divide((-sum_Iyy*sum_Ixt + sum_Ixy*sum_Iyt), det);
+  vy = native_divide(( sum_Ixy*sum_Ixt - sum_Ixx*sum_Iyt), det);
 
   Vx += vx;
   Vy += vy;
