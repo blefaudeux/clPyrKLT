@@ -5,4 +5,4 @@ project (clPyrKLT)
 # cause another cmake executable to run. The same process will walk through 
 # the project's entire directory structure.
 add_subdirectory (libClKLT) 
-add_subdirectory (example) 
+#add_subdirectory (Demo) 

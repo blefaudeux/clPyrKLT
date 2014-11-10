@@ -497,14 +497,15 @@ __global__ void track_pts_slim(float *coord_gpu,
   // Iteration part
   for(j=0; j < LK_iteration; ++j) {
     // If current speed vector drives the point out of bounds
-    if(cur_x < 0.f ||
-       cur_x > LK_pyr_w ||
-       cur_y < 0.f ||
-       cur_y > LK_pyr_h) {
+    if( cur_x < 0.f ||
+        cur_x > LK_pyr_w ||
+        cur_y < 0.f ||
+        cur_y > LK_pyr_h) {
 
       dx_gpu[idx] = 0.f;
       dy_gpu[idx] = 0.f;
       status_gpu[idx] = 0;
+
       return;
     }
 
