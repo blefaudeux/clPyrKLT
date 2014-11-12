@@ -26,43 +26,17 @@ See nghiaho12 @ yahoo.com (available without specific licence)
 #include "cudaLK.h"
 #include <stdio.h>
 
+#include "derivativeKernels.cu"
+#include "trackingKernels.cu"
+
 const float scaling[] = {1, 0.5f, 0.25f, 0.125f, 0.0625f, 0.03125f, 0.015625f, 0.0078125f};
 
 // TODO :
 // - constant velocity model : keep previous velocity if the point was already tracked
 // - adaptative gain  ?
 
-// Texture buffer is used for each image for on-the-fly interpolation
-texture <float, 2, cudaReadModeElementType> texRef_pyramid_prev;
-texture <float, 2, cudaReadModeElementType> texRef_pyramid_cur;
-
-// Image pyramids -> texture buffers
-texture <float, 2, cudaReadModeElementType> gpu_textr_pict_0;   // pictures > texture space
-texture <float, 2, cudaReadModeElementType> gpu_textr_pict_1;
-
-texture <float, 2, cudaReadModeElementType> gpu_textr_deriv_x;  // gradients > texture space
-texture <float, 2, cudaReadModeElementType> gpu_textr_deriv_y;
-
 // ----------------------------------------------------------------------
 
-// Constant values on device
-// /!\ undefined in host code, just in kernels /!\ __device__
-#define MAX_WEIGHT_VALUES 50
-
-__constant__ __device__ int   LK_iteration;
-__constant__ __device__ int   LK_patch;
-__constant__ __device__ int   LK_points;
-__constant__ __device__ int   LK_height;
-__constant__ __device__ int   LK_width;
-__constant__ __device__ int   LK_pyr_w;
-__constant__ __device__ int   LK_pyr_h;
-__constant__ __device__ int   LK_pyr_level;
-__constant__ __device__ int   LK_width_offset;
-__constant__ __device__ char  LK_init_guess;
-__constant__ __device__ float LK_scaling;
-__constant__ __device__ float LK_threshold;
-__constant__ __device__ float LK_Weight[MAX_WEIGHT_VALUES];
-__constant__ __device__ int   LK_win_size;
 
 
 // Possible weight coefficients for tracking cost evaluation :
@@ -95,621 +69,6 @@ int iDivUp( int a,  int b )
     return (a % b != 0) ? (a / b + 1) : (a / b);
 }
 
-// Convert RGB Picture to grey/float
-__global__ void convertRGBToGrey(unsigned char *d_in, float *d_out, int N)
-{
-    int idx = blockIdx.x*blockDim.x + threadIdx.x;
-
-    if(idx < N)
-    {
-        d_out[idx] = d_in[idx*3]*0.1144f
-                     + d_in[idx*3+1]*0.5867f
-                     + d_in[idx*3+2]*0.2989f;
-    }
-}
-
-// Convert Grey uchar picture to float
-__global__ void convertGreyToFloat(unsigned char const * const d_in, float *d_out, int const N)
-{
-    int idx = blockIdx.x*blockDim.x + threadIdx.x;
-
-    if(idx < N)
-        d_out[idx] = __fdividef((float) d_in[idx], 254.0);
-}
-
-// Downsample picture to build pyramid lower level (naive implementation..)
-__global__ void pyrDownsample(float const * const in, int w1, int h1, float * const out, int w2, int h2)
-{
-    // Input has to be greyscale
-    int x2 = blockIdx.x*blockDim.x + threadIdx.x;
-    int y2 = blockIdx.y*blockDim.y + threadIdx.y;
-
-    if( (x2 < w2) && (y2 < h2) ) {
-        int x = x2*2;
-        int y = y2*2;
-        int x_1 = x-1;
-        int y_1 = y-1;
-        int x_2 = x+1;
-        int y_2 = y+1;
-
-        // Pad values
-        if(x_1 < 0) x_1 = 0;
-        if(y_1 < 0) y_1 = 0;
-        if(x_2 >= w1) x_2 = w1 - 1;
-        if(y_2 >= h1) y_2 = h1 - 1;
-
-        //     Initial extrapolation pattern 1/4 1/8 1/16
-        out[y2*w2 + x2] = 0.25f*in[y*w1+x] + 0.125f*(in[y*w1+x_1] + in[y*w1+x_2] + in[y_1*w1+x] + in[y_2*w1+x]) +
-                0.0625f*(in[y_1*w1+x_1] + in[y_2*w1+x_1] + in[y_1*w1+x_2] + in[y_2*w1+x_2]);
-        {
-            // OpenCV extrapolation pattern :
-            //    out[y2*w2 + x2] = 0.375f*in[y*w1+x] + 0.25f*(in[y*w1+x_1] + in[y*w1+x_2] + in[y_1*w1+x] + in[y_2*w1+x]) +
-            //        0.0625f*(in[y_1*w1+x_1] + in[y_2*w1+x_1] + in[y_1*w1+x_2] + in[y_2*w1+x_2]);
-
-            //    // Another trial to improve interpolation pattern..
-            //    out[y2*w2 + x2] = 0.23077f*in[y*w1+x] + 0.15385f*(in[y*w1+x_1] + in[y*w1+x_2] + in[y_1*w1+x] + in[y_2*w1+x]) +
-            //        0.03846f*(in[y_1*w1+x_1] + in[y_2*w1+x_1] + in[y_1*w1+x_2] + in[y_2*w1+x_2]);
-        }
-
-    }
-}
-
-/*
-// Upsample a picture using the "magic" kernel
-__global__ void kernelMagicUpsampleX(float *in, int _w, int _h, float *out) {
-  // Coefficients : 1/4, 3/4, 3/4, 1/4 in each direction (doubles the size of the picture)
-
-  int x = blockIdx.x*blockDim.x + threadIdx.x;
-  int y = blockIdx.y*blockDim.y + threadIdx.y;
-
-  if(x >= _w || y >= _h)
-    return;
-
-  // Duplicate the points at the same place (?)
-  out[y*2*_w + 2*x] = in[y*_w+x];
-
-
-  if ((x < (_w-2)) && (x > 1))
-    out[y*2*_w + 2*x + 1] = __fdividef(3.0*(in[y*_w+x] + in[y*_w + x + 1]) + in[y*_w+x -1] + in[y*_w+x +2] , 8.0);
-
-}
-*/
-
-// Compute spatial derivatives using Scharr operator - Naive implementation..
-__global__ void kernelScharrX( float const *in, int _w, int _h, float *out) {
-    // Pattern : // Indexes :
-    // -3 -10 -3 // a1 b1 c1
-    //  0   0  0 // a2 b2 c2
-    //  3  10  3 // a3 b3 c3
-
-    int x = blockIdx.x*blockDim.x + threadIdx.x;
-    int y = blockIdx.y*blockDim.y + threadIdx.y;
-
-    if(x >= _w || y >= _h)
-        return;
-
-    int a = max(y-1,0);
-    int b = y;
-    int c = min((y+1),_h -1);
-
-    int a1, a3,
-            b1, b3,
-            c1, c3;
-
-    int i1 = max(x-1, 0);
-    int i3 = min(x+1, _w-1);
-
-    a1 = a*_w + i1;
-    a3 = a*_w + i3;
-
-    b1 = b*_w + i1;
-    b3 = b*_w + i3;
-
-    c1 = c*_w + i1;
-    c3 = c*_w + i3;
-
-    out[y*_w+x] = __fdividef(3.0 * (-in[a1]  -in[c1] + in[a3] + in[c3])
-                             + 10.0 * (in[b3] -in[b1]), 20.0);
-
-    //  out[y*_w+x] = -3.0*in[a1] -10.0*in[b1] -3.0*in[c1] + 3.0*in[a3] + 10.0*in[b3] + 3.0*in[c3];
-}
-
-// Compute spatial derivatives using Scharr operator - Naive implementation..
-__global__ void kernelScharrY( float const *in, int _w, int _h, float *out )
-{
-    int x = blockIdx.x*blockDim.x + threadIdx.x;
-    int y = blockIdx.y*blockDim.y + threadIdx.y;
-
-    if(x >= _w || y >= _h)
-        return;
-
-    // Pattern  // Indexes:
-    //  -3 0  3 // a1 b1 c1
-    // -10 0 10 // a2 b2 c2
-    //  -3 0  3 // a3 b3 c3
-
-    int a = max(y-1,0);
-    int c = min((y+1),_h -1);
-
-    int a1, a2, a3,
-            c1, c2, c3;
-
-    int i1 = max(x-1, 0);
-    int i3 = min(x+1, _w-1);
-
-    a1 = a*_w + i1;
-    a2 = a*_w + x;
-    a3 = a*_w + i3;
-
-    c1 = c*_w + i1;
-    c2 = c*_w + x;
-    c3 = c*_w + i3;
-
-    out[y*_w+x] = __fdividef(3.0*(- in[a1] -in[a3] +in[c1] +in[c3])
-                             + 10.0*(in[c2] -in[a2]), 20.0);
-
-    //  out[y*_w+x] = -3.0*in[a1] -10.0*in[a2] -3.0*in[a3] + 3.0*in[c1] + 10.0*in[c2] + 3.0*in[c3];
-}
-
-// Compute spatial derivatives using Sobel operator - Naive implementation..
-__global__ void kernelSobelX(float const * const in, int _w, int _h, float * const out) {
-    // Pattern : // Indexes :
-    // -1 -2 -1 // a1 b1 c1
-    //  0  0  0 // a2 b2 c2
-    //  1  2  1 // a3 b3 c3
-
-    int x = blockIdx.x*blockDim.x + threadIdx.x;
-    int y = blockIdx.y*blockDim.y + threadIdx.y;
-
-    if(x >= _w || y >= _h)
-        return;
-
-    int a = max(y-1,0);
-    int b = y;
-    int c = min((y+1),_h -1);
-
-    int a1, a3,
-            b1, b3,
-            c1, c3;
-
-    int i1 = max(x-1, 0);
-    int i3 = min(x+1, _w-1);
-
-    a1 = a*_w + i1;
-    a3 = a*_w + i3;
-
-    b1 = b*_w + i1;
-    b3 = b*_w + i3;
-
-    c1 = c*_w + i1;
-    c3 = c*_w + i3;
-
-    out[y*_w+x] = __fdividef(-1.0 * in[a1] -2.0 * in[b1] -1.0 * in[c1] + 1.0 * in[a3] + 2.0 * in[b3] + 1.0 * in[c3], 4.0);
-}
-
-// Compute spatial derivatives using Sobel operator - Naive implementation..
-__global__ void kernelSobelY( float const *in,
-                              int _w, int _h,
-                              float *out)
-{
-    int x = blockIdx.x*blockDim.x + threadIdx.x;
-    int y = blockIdx.y*blockDim.y + threadIdx.y;
-
-    if(x >= _w || y >= _h)
-        return;
-
-    // Pattern  // Indexes:
-    //  -1 0 1 // a1 b1 c1
-    // - 2 0 2 // a2 b2 c2
-    //  -1 0 1 // a3 b3 c3
-
-    int a = max(y-1,0);
-    int c = min((y+1),_h -1);
-
-    int a1, a2, a3,
-            c1, c2, c3;
-
-    int i1 = max(x-1, 0);
-    int i3 = min(x+1, _w-1);
-
-    a1 = a*_w + i1;
-    a2 = a*_w + x;
-    a3 = a*_w + i3;
-
-    c1 = c*_w + i1;
-    c2 = c*_w + x;
-    c3 = c*_w + i3;
-
-    out[y*_w + x] = __fdividef(-1.0*in[a1] -2.0*in[a2] -1.0*in[a3] + 1.0*in[c1] + 2.0*in[c2] + 1.0*in[c3], 4.0);
-}
-
-__global__ void kernelAdd(float const *in1,
-                          float const *in2,
-                          int _w,
-                          int _h,
-                          float *out) {
-
-    int x = blockIdx.x*blockDim.x + threadIdx.x;
-    int y = blockIdx.y*blockDim.y + threadIdx.y;
-
-    if(x >= _w || y >= _h)
-        return;
-
-    out[y*_w + x] = __fsqrt_rn(__fadd_rn(__fmul_rn(in1[y*_w + x],in1[y*_w + x]), __fmul_rn(in2[y*_w + x],in2[y*_w + x])));
-}
-
-
-// Low pass gaussian-like filtering before subsampling
-__global__ void kernelSmoothX(float *in, int w, int h, float *out)
-{
-    int x = blockIdx.x*blockDim.x + threadIdx.x;
-    int y = blockIdx.y*blockDim.y + threadIdx.y;
-
-    if(x >= w || y >= h)
-        return;
-
-    int idx = y*w;
-
-    int a = x-2;
-    int b = x-1;
-    int c = x;
-    int d = x+1;
-    int e = x+2;
-
-    if(a < 0) a = 0;
-    if(b < 0) b = 0;
-    if(d >= w) d = w-1;
-    if(e >= w) e = w-1;
-
-    out[y*w+x] = 0.0625f*in[idx+a] + 0.25f*in[idx+b] + 0.375f*in[idx+c] + 0.25f*in[idx+d] + 0.0625f*in[idx+e];
-}
-
-// Low pass gaussian-like filtering before subsampling
-__global__ void kernelSmoothY(float const * in,
-                              int w, int h,
-                              float * out)
-{
-    int x = blockIdx.x*blockDim.x + threadIdx.x;
-    int y = blockIdx.y*blockDim.y + threadIdx.y;
-
-    if(x >= w || y >= h)
-        return;
-
-    int a = y-2;
-    int b = y-1;
-    int c = y;
-    int d = y+1;
-    int e = y+2;
-
-    if(a < 0) a = 0;
-    if(b < 0) b = 0;
-    if(d >= h) d = h-1;
-    if(e >= h) e = h-1;
-
-    out[y*w+x] = 0.0625f*in[a*w+x] + 0.25f*in[b*w+x] + 0.375f*in[c*w+x] + 0.25f*in[d*w+x] + 0.0625f*in[e*w+x];
-}
-
-
-__global__ void compute_spatial_grad(float const * const coord_gpu,
-                                     char   *status_gpu,
-                                     float  *gpu_neighbourhood_det,
-                                     float  *gpu_neighbourhood_Iyy,
-                                     float  *gpu_neighbourhood_Ixy,
-                                     float  *gpu_neighbourhood_Ixx) {
-
-    int idx = (blockIdx.x*blockDim.x + threadIdx.x)
-              + (blockIdx.y*blockDim.y + threadIdx.y) * gridDim.x * blockDim.x; // "2D" indexing
-
-    if (idx >= LK_points)
-        return;
-
-    float x_pt = coord_gpu[2*idx];
-    float y_pt = coord_gpu[2*idx+1];
-
-    if(x_pt > (LK_width-1) ||
-            y_pt > (LK_height-1)) // Useful check ?
-        return;
-
-    if(status_gpu[idx] == 0)
-        return;
-
-    x_pt *= LK_scaling;
-    y_pt *= LK_scaling;
-
-    int xx, yy;
-    float Ix, Iy, sum_Ixy, sum_Iyy, sum_Ixx;
-
-    // TODO : offset the coordinate to access derivatives array
-
-    for(yy=-LK_patch; yy <= LK_patch; ++yy) {
-        for(xx=-LK_win_size; xx <= LK_win_size; ++xx) {
-
-            Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
-            Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
-
-            sum_Ixx += Ix * Ix;
-            sum_Ixy += Ix * Iy;
-            sum_Iyy += Iy * Iy;
-        }
-    }
-
-    gpu_neighbourhood_det[idx] = sum_Ixx*sum_Iyy - sum_Ixy*sum_Ixy;
-    gpu_neighbourhood_Iyy[idx] = sum_Iyy;
-    gpu_neighbourhood_Ixy[idx] = sum_Ixy;
-    gpu_neighbourhood_Ixx[idx] = sum_Ixx;
-
-    // Deal with case : could not track (no gradient)
-    if(gpu_neighbourhood_det[idx] < MIN_DET) {
-        status_gpu[idx] = 0;
-        return;
-    }
-}
-
-// Kernel to compute the tracking
-__global__ void track_pts_slim(float * const coord_gpu,
-                               float *dx_gpu,
-                               float *dy_gpu,
-                               char  *status_gpu,
-                               const float * const gpu_neighbourhood_det,
-                               const float * const gpu_neighbourhood_Iyy,
-                               const float * const gpu_neighbourhood_Ixy,
-                               const float * const gpu_neighbourhood_Ixx)
-{
-    int idx = (blockIdx.x*blockDim.x + threadIdx.x)
-              + (blockIdx.y*blockDim.y + threadIdx.y) * gridDim.x * blockDim.x; // "2D" indexing
-
-    if (idx >= LK_points)
-        return;
-
-    float x_pt = coord_gpu[2*idx];
-    float y_pt = coord_gpu[2*idx+1];
-
-    if(x_pt > (LK_width-1) || y_pt > (LK_height-1))
-        return;
-
-    if(status_gpu[idx] == 0)
-        return;
-
-    float Vx, Vy;            // Previous speed for this point
-    float cur_x, cur_y;      // Current position
-    float sum_Ixt, sum_Iyt;
-    float Ix, Iy, It;
-    int j;                   // Research window indexes
-    float xx, yy;
-    float vx, vy;
-
-    x_pt *= LK_scaling;
-    y_pt *= LK_scaling;
-
-    if(LK_init_guess) {
-        Vx = 0.f;
-        Vy = 0.f;
-        cur_x = x_pt;
-        cur_y = y_pt;
-    }
-    else {
-        Vx = dx_gpu[idx];
-        Vy = dy_gpu[idx];
-        cur_x = x_pt + Vx;
-        cur_y = y_pt + Vy;
-    }
-
-    // Iteration part
-    for(j=0; j < LK_iteration; ++j) {
-        // If current speed vector drives the point out of bounds
-        if( cur_x < 0.f ||
-                cur_x > LK_pyr_w ||
-                cur_y < 0.f ||
-                cur_y > LK_pyr_h) {
-
-            dx_gpu[idx] = 0.f;
-            dy_gpu[idx] = 0.f;
-            status_gpu[idx] = 0;
-
-            return;
-        }
-
-        sum_Ixt = 0.f;
-        sum_Iyt = 0.f;
-
-        // No explicit handling of pixels outside the image
-        // Texture fetchs ensure calls are clamped to window size
-        for(yy=-LK_patch; yy <= LK_patch; ++yy) {
-            for(xx=-LK_win_size; xx <= LK_win_size; ++xx) {
-                It = tex2D(gpu_textr_pict_1, cur_x + LK_width_offset + xx, cur_y + yy)
-                     - tex2D(gpu_textr_pict_0, x_pt + LK_width_offset + xx, y_pt + yy);
-
-                Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
-                Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
-
-                sum_Ixt += Ix*It;
-                sum_Iyt += Iy*It;
-            }
-        }
-
-        // Find the inverse of the 2x2 matrix using a mix of determinant and adjugate matrix
-        // http://cnx.org/content/m19446/latest/
-        vx = __fdividef((- gpu_neighbourhood_Iyy[idx] * sum_Ixt +
-                         gpu_neighbourhood_Ixy[idx] * sum_Iyt), gpu_neighbourhood_det[idx]);
-
-        vy = __fdividef(( gpu_neighbourhood_Ixy[idx] * sum_Ixt -
-                          gpu_neighbourhood_Ixx[idx] * sum_Iyt), gpu_neighbourhood_det[idx]);
-
-        Vx += vx;
-        Vy += vy;
-        cur_x += vx;
-        cur_y += vy;
-
-        // Stop if movement is very small
-        if(fabsf(vx) < LK_threshold &&
-                fabsf(vy) < LK_threshold)
-            break;
-    }
-
-    // Double speed vector to get to next scale
-    if(LK_pyr_level != 0) {
-        Vx += Vx;
-        Vy += Vy;
-    }
-
-    dx_gpu[idx] = Vx;
-    dy_gpu[idx] = Vy;
-
-    // Shift coordinates of the points to track
-    if (LK_pyr_level == 0) {
-        coord_gpu[2*idx  ] -= Vx;
-        coord_gpu[2*idx+1] -= Vy;
-    }
-}
-
-// Kernel to compute the tracking
-__global__ void track_pts_weighted(float * const coord_gpu,
-                                   float * const dx_gpu,
-                                   float * const dy_gpu,
-                                   char  * const status_gpu,
-                                   bool  rectified)
-{
-    int idx = (blockIdx.x*blockDim.x + threadIdx.x)
-              + (blockIdx.y*blockDim.y + threadIdx.y) * gridDim.x * blockDim.x; // "2D" indexing
-
-    if (idx >= LK_points)
-        return;
-
-    float x_pt = coord_gpu[2*idx];
-    float y_pt = coord_gpu[2*idx+1];
-
-    if(x_pt > (LK_width-1) ||
-            y_pt > (LK_height-1)) // Useful check ?
-        return;
-
-    if(status_gpu[idx] == 0)
-        return;
-
-    float Vx, Vy;            // Previous speed for this point
-    float cur_x, cur_y;      // Current position
-    float sum_Ixx = 0.f;
-    float sum_Ixy = 0.f;
-    float sum_Iyy = 0.f;
-    float sum_Ixt, sum_Iyt;
-    float Ix, Iy, It;
-    int j;                   // Research window indexes
-    float xx, yy;
-    float det;
-    float vx, vy;
-
-    x_pt *= LK_scaling;
-    y_pt *= LK_scaling;
-
-    if(LK_init_guess) {
-        Vx = 0.f;
-        Vy = 0.f;
-        cur_x = x_pt;
-        cur_y = y_pt;
-    }
-    else {
-        Vx = dx_gpu[idx];
-        Vy = dy_gpu[idx];
-        cur_x = x_pt + Vx;
-        cur_y = y_pt + Vy;
-    }
-
-    float temp_weight = 1.f;
-
-    // Compute spatial gradient (only once) from texture fetches
-    int win_size;
-
-    if (rectified) {
-        win_size = 2;
-    } else {
-        win_size = LK_patch;
-    }
-
-    for(yy=-win_size; yy <= win_size; ++yy) {
-        for(xx=-LK_patch; xx <= LK_patch; ++xx) {
-
-            temp_weight = LK_Weight[(int)(yy + xx*LK_patch)];
-            temp_weight *= temp_weight;
-
-            Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
-            Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
-
-            sum_Ixx += Ix * Ix * temp_weight;
-            sum_Ixy += Ix * Iy * temp_weight;
-            sum_Iyy += Iy * Iy * temp_weight;
-        }
-    }
-
-    det = sum_Ixx*sum_Iyy - sum_Ixy*sum_Ixy;
-
-    // Deal with case : could not track (no gradient)
-    if(det < MIN_DET) {
-        status_gpu[idx] = 0;
-        return;
-    }
-
-    // Iteration part
-    for(j=0; j < LK_iteration; ++j) {
-        // If current speed vector drives the point out of bounds
-        if(cur_x < 0.f ||
-                cur_x > LK_pyr_w ||
-                cur_y < 0.f ||
-                cur_y > LK_pyr_h) {
-            status_gpu[idx] = 0;
-            return;
-        }
-
-        sum_Ixt = 0.f;
-        sum_Iyt = 0.f;
-
-        // No explicit handling of pixels outside the image
-        // Texture fetchs ensure calls are clamped to window size
-        for(yy=-win_size; yy <= win_size; ++yy) {
-            for(xx=-LK_patch; xx <= LK_patch; ++xx) {
-                It = tex2D(gpu_textr_pict_1, cur_x + LK_width_offset + xx, cur_y + yy)
-                     - tex2D(gpu_textr_pict_0, x_pt + LK_width_offset + xx, y_pt + yy);
-
-                temp_weight = LK_Weight[(int)(yy + xx*LK_patch)];
-                temp_weight *= temp_weight;
-
-                Ix = tex2D(gpu_textr_deriv_x, x_pt + LK_width_offset + xx, y_pt + yy);
-                Iy = tex2D(gpu_textr_deriv_y, x_pt + LK_width_offset + xx, y_pt + yy);
-
-                sum_Ixt += Ix * It * temp_weight;
-                sum_Iyt += Iy * It * temp_weight;
-            }
-        }
-
-        // Find the inverse of the 2x2 matrix using a mix of determinant and adjugate matrix
-        // http://cnx.org/content/m19446/latest/
-        vx = __fdividef((-sum_Iyy*sum_Ixt + sum_Ixy*sum_Iyt), det);
-        vy = __fdividef(( sum_Ixy*sum_Ixt - sum_Ixx*sum_Iyt), det);
-
-        Vx += vx;
-        Vy += vy;
-        cur_x += vx;
-        cur_y += vy;
-
-        // Stop if movement is very small
-        if(fabsf(vx) < LK_threshold &&
-                fabsf(vy) < LK_threshold)
-            break;
-    }
-
-    // Double speed vector to get to next scale
-    if(LK_pyr_level != 0) {
-        Vx += Vx;
-        Vy += Vy;
-    }
-
-    dx_gpu[idx] = Vx;
-    dy_gpu[idx] = Vy;
-
-    // Shift coordinates of the points to track
-    if (LK_pyr_level == 0) {
-        coord_gpu[2*idx  ] -= Vx;
-        coord_gpu[2*idx+1] -= Vy;
-    }
-}
 
 
 
@@ -781,6 +140,27 @@ void cudaLK::bindTextureUnits( cudaArray *pict0,
     cudaBindTextureToArray (gpu_textr_deriv_y,   deriv_y, gpu_textr_deriv_y.channelDesc);
 }
 
+void cudaLK::buildPyramids()
+{
+    // 1D & 2D-indexing of kernels
+    int blocksW = w/_n_threads_x + ((w % _n_threads_x)?1:0);
+    int blocksH = h/_n_threads_y + ((h % _n_threads_y )?1:0);
+    dim3 blocks(blocksW, blocksH);
+    dim3 threads(_n_threads_x, _n_threads_y);
+
+    // Build pyramids
+    for(int i=0; i < _n_pyramids-1; i++) {
+        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_prev1[i], pyr_w[i], pyr_h[i], gpu_smoothed_prev1_x);
+        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_prev2[i], pyr_w[i], pyr_h[i], gpu_smoothed_prev2_x);
+
+        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_prev1_x, pyr_w[i], pyr_h[i], gpu_smoothed_prev1);
+        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_prev2_x, pyr_w[i], pyr_h[i], gpu_smoothed_prev2);
+
+        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_prev1, pyr_w[i], pyr_h[i], gpu_img_pyramid_prev1[i+1], pyr_w[i+1], pyr_h[i+1]);
+        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_prev2, pyr_w[i], pyr_h[i], gpu_img_pyramid_prev2[i+1], pyr_w[i+1], pyr_h[i+1]);
+    }
+}
+
 void cudaLK::checkCUDAError(const char *msg) {
     // Check GPU status to catch errors
     // "msg" is printed in case of an exception
@@ -849,6 +229,36 @@ void cudaLK::computeDerivatives(float const *in,
     //  checkCUDAError("ComputingSpatialDerivatives-memdump");
 }
 
+void cudaLK::cvtPicture(bool useCurrent, bool cvtToGrey)
+{
+    int blocks1D = (w*h)/256 + (w*h % 256?1:0); // for greyscale
+
+    if (useCurrent)
+    {
+        if (cvtToGrey) {
+            // RGB -> grey
+            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_cur1_RGB, gpu_img_pyramid_cur1[0], w*h);
+            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_cur2_RGB, gpu_img_pyramid_cur2[0], w*h);
+        } else {
+            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_cur1_RGB, gpu_img_pyramid_cur1[0], w*h);
+            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_cur2_RGB, gpu_img_pyramid_cur2[0], w*h);
+        }
+    }
+    else
+    {
+        if (cvtToGrey) {
+            // RGB -> grey
+            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_prev1_RGB, gpu_img_pyramid_prev1[0], w*h);
+            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_prev2_RGB, gpu_img_pyramid_prev2[0], w*h);
+            checkCUDAError("convertRGBToGrey");
+        } else {
+            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_prev1_RGB, gpu_img_pyramid_prev1[0], w*h);
+            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_prev2_RGB, gpu_img_pyramid_prev2[0], w*h);
+            checkCUDAError("convertToFloat");
+        }
+    }
+}
+
 void cudaLK::exportDebug(IplImage *outPict) {
     // Debug function to see what's going on in picture buffers
     // Not reliable for IPLImages because of widthStep --> TODO ?
@@ -857,13 +267,9 @@ void cudaLK::exportDebug(IplImage *outPict) {
     float pict_x_f[w*h];
     //  float pict_y_f[w*h];
 
-
     // SOBEL
-
     cudaMemcpy (pict_x_f, gpu_img_pyramid_prev1[0], w*h*sizeof(float), cudaMemcpyDeviceToHost);
-
     //  cudaMemcpy (pict_x_f, gpu_img_pyramid_cur1[0], w*h*sizeof(float), cudaMemcpyDeviceToHost);
-
 
     // Get picture max value
     float val = 0.f;
@@ -1118,14 +524,12 @@ void cudaLK::fillDerivatives(float **pict_pyramid,
     }
 }
 
-// Load initial pictures to be used in backbuffers (and allocate memory if nedded)
-// Just called once
 void cudaLK::loadBackPictures(const IplImage *prev1,
                               const IplImage *prev2,
                               bool b_CvtToGrey) {
-    //
-    // Initial load of pitures
-    //
+
+    // Load initial pictures to be used in backbuffers (and allocate memory if nedded)
+    // Just called once
 
     // Allocate memory if needed
     if (!b_mem4_allocated) {
@@ -1163,13 +567,6 @@ void cudaLK::loadBackPictures(const IplImage *prev1,
     }
     checkCUDAError("LoadBackPicture - set symbols");
 
-    // 1D & 2D-indexing of kernels
-    int blocksW = w/_n_threads_x + ((w % _n_threads_x)?1:0);
-    int blocksH = h/_n_threads_y + ((h % _n_threads_y )?1:0);
-    dim3 blocks(blocksW, blocksH);
-    dim3 threads(_n_threads_x, _n_threads_y);
-    int blocks1D = (w*h)/256 + (w*h % 256?1:0); // for greyscale
-
     // Transfer from host memspace to gpu memspace
     if (b_CvtToGrey) {
         cudaMemcpy2D (gpu_img_prev1_RGB, w*sizeof(uchar), prev1->imageData, prev1->widthStep, 3 * prev1->width * sizeof(uchar), prev1->height, cudaMemcpyHostToDevice );
@@ -1182,29 +579,8 @@ void cudaLK::loadBackPictures(const IplImage *prev1,
 
 
     // Convert picture to floats & grey
-    if (b_CvtToGrey) {
-        // RGB -> grey
-        convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_prev1_RGB, gpu_img_pyramid_prev1[0], w*h);
-        convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_prev2_RGB, gpu_img_pyramid_prev2[0], w*h);
-        checkCUDAError("convertRGBToGrey");
-    } else {
-        convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_prev1_RGB, gpu_img_pyramid_prev1[0], w*h);
-        convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_prev2_RGB, gpu_img_pyramid_prev2[0], w*h);
-        checkCUDAError("convertToFloat");
-    }
-
-    // Build pyramids
-    for(int i=0; i < _n_pyramids-1; i++) {
-        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_prev1[i], pyr_w[i], pyr_h[i], gpu_smoothed_prev1_x);
-        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_prev2[i], pyr_w[i], pyr_h[i], gpu_smoothed_prev2_x);
-
-        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_prev1_x, pyr_w[i], pyr_h[i], gpu_smoothed_prev1);
-        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_prev2_x, pyr_w[i], pyr_h[i], gpu_smoothed_prev2);
-
-        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_prev1, pyr_w[i], pyr_h[i], gpu_img_pyramid_prev1[i+1], pyr_w[i+1], pyr_h[i+1]);
-        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_prev2, pyr_w[i], pyr_h[i], gpu_img_pyramid_prev2[i+1], pyr_w[i+1], pyr_h[i+1]);
-    }
-
+    cvtPicture(false, b_CvtToGrey);
+    buildPyramids();
     checkCUDAError("pyrDownsample");
 
     // Load cudaArray buffer from pyramids
@@ -1266,7 +642,6 @@ void cudaLK::loadCurPictures(const IplImage *cur1,
     int blocksH = h/_n_threads_y + ((h % _n_threads_y)?1:0);
     dim3 blocks(blocksW, blocksH);
     dim3 threads(_n_threads_x, _n_threads_y);
-    int blocks1D = (w*h)/256 + (w*h % 256?1:0); // for greyscale
 
     // Transfer from host memspace to gpu memspace
     if (b_CvtToGrey) {
@@ -1280,14 +655,7 @@ void cudaLK::loadCurPictures(const IplImage *cur1,
     checkCUDAError("pictCopyToGPU");
 
     // Convert picture to floats & grey
-    if (b_CvtToGrey) {
-        // RGB -> grey
-        convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_cur1_RGB, gpu_img_pyramid_cur1[0], w*h);
-        convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_cur2_RGB, gpu_img_pyramid_cur2[0], w*h);
-    } else {
-        convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_cur1_RGB, gpu_img_pyramid_cur1[0], w*h);
-        convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_cur2_RGB, gpu_img_pyramid_cur2[0], w*h);
-    }
+    cvtPicture(true, b_CvtToGrey);
     checkCUDAError("pictConversion");
 
     // Build pyramids
@@ -1338,6 +706,48 @@ void cudaLK::loadCurPictures(const IplImage *cur1,
     cudaMemset(gpu_status, 1, sizeof(char) * MAX_POINTS); // Ready to track
 
     checkCUDAError("Pyramid building");
+}
+
+void cudaLK::processTracking( int nPoints )
+{
+
+
+    // 2D-indexing for kernels
+    int n_pts_ceil = MIN(nPoints, MAX_POINTS);
+    int n_pts_sq = (int) round( sqrt(n_pts_ceil)) + 1;
+
+    int blocksW = n_pts_sq/_n_threads_x +
+                  ((n_pts_sq % _n_threads_x)?1:0);
+
+    int blocksH = n_pts_sq/_n_threads_y +
+                  ((n_pts_sq % _n_threads_y )?1:0);
+
+    dim3 blocks(blocksW, blocksH);
+    dim3 threads(_n_threads_x, _n_threads_y);
+
+    for( int l = _n_pyramids-1; l >= 0; l-- )
+    {
+        // Set constant parameters
+        setSymbols(l);
+
+        // Compute gradient descent parameters
+        compute_spatial_grad <<<blocks, threads>>>(gpu_pt_indexes,
+                                                   gpu_status,
+                                                   gpu_neighbourhood_det,
+                                                   gpu_neighbourhood_Iyy,
+                                                   gpu_neighbourhood_Ixy,
+                                                   gpu_neighbourhood_Ixx);
+
+        // Compute the new position of the points
+        track_pts_slim<<<blocks, threads>>>(gpu_pt_indexes,
+                                            gpu_dx,
+                                            gpu_dy,
+                                            gpu_status,
+                                            gpu_neighbourhood_det,
+                                            gpu_neighbourhood_Iyy,
+                                            gpu_neighbourhood_Ixy,
+                                            gpu_neighbourhood_Ixx);
+    }
 }
 
 void cudaLK::resetDisplacements() {
@@ -1479,43 +889,33 @@ void cudaLK::releaseMem() {
 
 // Coherent sparse tracking on stereo pair
 //!\\ Previous set of pictures must be loaded prior to using this function
-void cudaLK::run4Frames(IplImage  *cur1,
-                        IplImage  *cur2,
-                        float     *pt_to_track,
-                        int       n_pts,
-                        bool      b_CvtToGrey) {
-
-    int width   = cur1->width,
-            height  = cur1->height;
+void cudaLK::run4Frames( IplImage  *cur1,
+                         IplImage  *cur2,
+                         float     *pt_to_track,
+                         int       nPoints,
+                         bool      cvtToGrey )
+{
+    int const & width  = cur1->width;
+    int const & height = cur1->height;
+    int const n_pts_ceil = MIN(nPoints, MAX_POINTS);
 
     // Check memory allocation before proceeding
-    if (!b_mem4_allocated) {
+    if (!b_mem4_allocated)
+    {
         fprintf(stderr, "run4Frames : error - memory must be allocated and \n .. initial pictures loaded\n");
         exit(EXIT_FAILURE);
-    } else if ((width != w) || (height != h)) {
+    }
+    else if ((width != w) || (height != h))
+    {
         fprintf(stderr, "run4Frames : error - Pictures must have the same size\n");
         exit(EXIT_FAILURE);
     }
 
-    // 2D-indexing for kernels
-    int n_pts_ceil = MIN(n_pts, MAX_POINTS);
-
-    int n_pts_sq = (int) round( sqrt(n_pts_ceil)) + 1;
-
-    int blocksW = n_pts_sq/_n_threads_x +
-                  ((n_pts_sq % _n_threads_x)?1:0);
-
-    int blocksH = n_pts_sq/_n_threads_y +
-                  ((n_pts_sq % _n_threads_y )?1:0);
-
-    dim3 blocks(blocksW, blocksH);
-    dim3 threads(_n_threads_x, _n_threads_y);
-
-    int  win_size_full = _patch_radius, l;
+    int win_size_full = _patch_radius;
     int win_size_short = 2;
 
     // Load current pictures & build pyramids
-    loadCurPictures(cur1, cur2, b_CvtToGrey);
+    loadCurPictures(cur1, cur2, cvtToGrey);
 
     // Load the coordinates of the points to track & define some settings
     cudaMemcpy(gpu_pt_indexes, pt_to_track, 2 * n_pts_ceil * sizeof(float), cudaMemcpyHostToDevice);
@@ -1528,41 +928,17 @@ void cudaLK::run4Frames(IplImage  *cur1,
 
     // -----------------------------------------------------
     // --- Step 1 -----
-    cudaMemcpyToSymbol (LK_win_size, &win_size_short, sizeof(int)); // win_size_short
 
     // Bind textures and arrays...
+    cudaMemcpyToSymbol (LK_win_size, &win_size_short, sizeof(int)); // win_size_short
     bindTextureUnits(gpu_array_pict_0,
                      gpu_array_pict_3,
                      gpu_array_deriv_x_0,
                      gpu_array_deriv_y_0);
 
-    checkCUDAError ("Setting up textures");
-
-    // Set displacements to 0 :
+    // Process
     resetDisplacements();
-
-    for(l = _n_pyramids-1; l >= 0; l--) {
-        // Set constant parameters
-        setSymbols(l);
-
-        // Compute gradient descent parameters
-        compute_spatial_grad <<<blocks, threads>>>(gpu_pt_indexes,
-                                                   gpu_status,
-                                                   gpu_neighbourhood_det,
-                                                   gpu_neighbourhood_Iyy,
-                                                   gpu_neighbourhood_Ixy,
-                                                   gpu_neighbourhood_Ixx);
-
-        // Compute the new position of the points
-        track_pts_slim<<<blocks, threads>>>(gpu_pt_indexes,
-                                            gpu_dx,
-                                            gpu_dy,
-                                            gpu_status,
-                                            gpu_neighbourhood_det,
-                                            gpu_neighbourhood_Iyy,
-                                            gpu_neighbourhood_Ixy,
-                                            gpu_neighbourhood_Ixx);
-    }
+    processTracking(nPoints);
     checkCUDAError ("First step");
 
     // Copy back results
@@ -1576,38 +952,17 @@ void cudaLK::run4Frames(IplImage  *cur1,
 
     // -----------------------------------------------------
     // --- Step 2 -----
-    cudaMemcpyToSymbol (LK_win_size, &win_size_full, sizeof(int));
 
     // Change texture binding
+    cudaMemcpyToSymbol (LK_win_size, &win_size_full, sizeof(int));
     bindTextureUnits(gpu_array_pict_3,
                      gpu_array_pict_2,
                      gpu_array_deriv_x_3,
                      gpu_array_deriv_y_3);
 
-    // Set displacements to 0 :
+    // Process
     resetDisplacements();
-
-    for(l = _n_pyramids-1; l >= 0; l--) {
-        // Set constant parameters - for all kernels
-        setSymbols(l);
-
-        // Compute the gradient descent parameters
-        compute_spatial_grad <<<blocks, threads>>>(gpu_pt_indexes,
-                                                   gpu_status,
-                                                   gpu_neighbourhood_det,
-                                                   gpu_neighbourhood_Iyy,
-                                                   gpu_neighbourhood_Ixy,
-                                                   gpu_neighbourhood_Ixx);
-        // Track iterations
-        track_pts_slim<<<blocks, threads>>>(gpu_pt_indexes,
-                                            gpu_dx,
-                                            gpu_dy,
-                                            gpu_status,
-                                            gpu_neighbourhood_det,
-                                            gpu_neighbourhood_Iyy,
-                                            gpu_neighbourhood_Ixy,
-                                            gpu_neighbourhood_Ixx);
-    }
+    processTracking(nPoints);
     checkCUDAError ("Second step");
 
     // Copy back results
@@ -1630,31 +985,9 @@ void cudaLK::run4Frames(IplImage  *cur1,
                      gpu_array_deriv_x_2,
                      gpu_array_deriv_y_2);
 
-    // Set displacements to 0 :
+    // Process
     resetDisplacements();
-
-    for(l = _n_pyramids-1; l >= 0; l--) {
-        // Set constant parameters
-        setSymbols(l);
-
-        // Compute the gradient descent parameters
-        compute_spatial_grad <<<blocks, threads>>>(gpu_pt_indexes,
-                                                   gpu_status,
-                                                   gpu_neighbourhood_det,
-                                                   gpu_neighbourhood_Iyy,
-                                                   gpu_neighbourhood_Ixy,
-                                                   gpu_neighbourhood_Ixx);
-
-        // Track iterations
-        track_pts_slim<<<blocks, threads>>>(gpu_pt_indexes,
-                                            gpu_dx,
-                                            gpu_dy,
-                                            gpu_status,
-                                            gpu_neighbourhood_det,
-                                            gpu_neighbourhood_Iyy,
-                                            gpu_neighbourhood_Ixy,
-                                            gpu_neighbourhood_Ixx);
-    }
+    processTracking(nPoints);
     checkCUDAError ("Third step");
 
     // Copy back results
@@ -1678,31 +1011,10 @@ void cudaLK::run4Frames(IplImage  *cur1,
                      gpu_array_deriv_x_1,
                      gpu_array_deriv_y_1);
 
-    // Set displacements to 0 :
+    // Process
     resetDisplacements();
+    processTracking(nPoints);
 
-    for(l = _n_pyramids-1; l >= 0; l--) {
-        // Set constant parameters
-        setSymbols(l);
-
-        // Compute the gradient descent parameters
-        compute_spatial_grad <<<blocks, threads>>>(gpu_pt_indexes,
-                                                   gpu_status,
-                                                   gpu_neighbourhood_det,
-                                                   gpu_neighbourhood_Iyy,
-                                                   gpu_neighbourhood_Ixy,
-                                                   gpu_neighbourhood_Ixx);
-
-        // Track iterations
-        track_pts_slim<<<blocks, threads>>>(gpu_pt_indexes,
-                                            gpu_dx,
-                                            gpu_dy,
-                                            gpu_status,
-                                            gpu_neighbourhood_det,
-                                            gpu_neighbourhood_Iyy,
-                                            gpu_neighbourhood_Ixy,
-                                            gpu_neighbourhood_Ixx);
-    }
     cudaThreadSynchronize();
     checkCUDAError ("Last step");
 

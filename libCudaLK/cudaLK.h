@@ -40,7 +40,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define NTHREAD_Y   14
 #define MAX_ITERATIONS 20
 #define MV_THRESHOLD   .3F
-#define MIN_DET FLT_EPSILON
 
 // MIN/MAX macros
 #ifndef MIN
@@ -53,282 +52,183 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 class cudaLK
 {
-  private:
-    /*!
-       * \brief initMem
-       */
-    void initMem();
+    public:
+        cudaLK();
 
-    /*!
-       * \brief initMem4Frame
-       */
-    void initMem4Frame();
+        cudaLK(int n_pyramids, int patch_radius, int n_max_points, bool weighted_norm);
 
-    /*!
-     * \brief fillDerivatives
-     * \param pict_pyramid
-     * \param gpu_array_deriv_x
-     * \param gpu_array_deriv_y
-     */
-    void fillDerivatives(float **pict_pyramid,
-                         cudaArray *gpu_array_deriv_x,
-                         cudaArray *gpu_array_deriv_y);
+        ~cudaLK();
 
-    void bindTextureUnits(cudaArray *pict0,
-                          cudaArray *pict1,
-                          cudaArray *deriv_x,
-                          cudaArray *deriv_y);
+        void resetDisplacements();
 
-    /*!
-       * \brief releaseMem
-       */
-    void releaseMem();
+        void run4Frames(IplImage *cur1, IplImage *cur2, float *pt_to_track, int  nPoints, bool cvtToGrey) ;
 
-    /*!
-       * \brief swapPyramids
-       */
-    void swapPyramids();
+        void loadBackPictures(const IplImage *prev1, const IplImage *prev2, bool b_CvtToGrey);
 
-    /*!
-       * \brief setupTextures
-       */
-    void setupTextures();
+        void loadCurPictures(const IplImage *cur1, const IplImage *cur2, bool b_CvtToGrey);
 
-    /*!
-     * \brief setSymbols
-     * \param pyr_level
-     */
-    void setSymbols(int pyr_level);
+        void exportDebug(IplImage *outPict);
 
-    /*!
-     * \brief computeDerivatives
-     * \param in
-     * \param _w
-     * \param _h
-     * \param deriv_buff_x
-     * \param deriv_buff_y
-     * \param gpu_array_deriv_x
-     * \param gpu_array_deriv_y
-     */
-    void computeDerivatives(const float *in,
-                            float       *deriv_buff_x,
-                            float       *deriv_buff_y,
-                            int         pyr_level,
-                            cudaArray   *gpu_array_deriv_x,
-                            cudaArray   *gpu_array_deriv_y);
+        void sobelFiltering(const float *pict_in,
+                            const int w,
+                            const int h,
+                            float *pict_out);
 
-    /*!
-       * \brief checkCUDAError
-       * \param msg
-       */
-    void checkCUDAError(const char *msg);
+        void sobelFilteringX(const float *pict_in,
+                             const int w,
+                             const int h,
+                             float *pict_out);
 
-    // Flag
-    bool b_use_weighted_norm;
+        void sobelFilteringY(const float *pict_in,
+                             const int w,
+                             const int h,
+                             float *pict_out);
 
-    int w, h;
-    int _n_pyramids, _patch_radius, _max_points;
-    int pyr_w[LEVELS], pyr_h[LEVELS];
-    int _n_threads_x, _n_threads_y;
+        void dummyCall();
 
-    // TODO : cleanup using structures !
-    //
-    // |
-    // V
-    unsigned char *gpu_img_prev_RGB;
-    unsigned char *gpu_img_cur_RGB;
+    private:
+        void initMem();
 
-    // 4-Frame tracking
-    unsigned char *gpu_img_prev1_RGB;
-    unsigned char *gpu_img_prev2_RGB;
+        void initMem4Frame();
 
-    unsigned char *gpu_img_cur1_RGB;
-    unsigned char *gpu_img_cur2_RGB;
+        void bindTextureUnits(cudaArray *pict0,
+                              cudaArray *pict1,
+                              cudaArray *deriv_x,
+                              cudaArray *deriv_y);
+        void buildPyramids();
 
-    // Picture buffers
-    float *gpu_img_pyramid_prev1[LEVELS];
-    float *gpu_img_pyramid_prev2[LEVELS];
-    float *gpu_img_pyramid_cur1[LEVELS];
-    float *gpu_img_pyramid_cur2[LEVELS];
+        void cvtPicture(bool useCurrent, bool cvtToGrey);
 
-    float *gpu_sobel_prev1;
-    float *gpu_sobel_prev2;
-    float *gpu_sobel_cur1;
-    float *gpu_sobel_cur2;
+        void fillDerivatives(float **pict_pyramid,
+                             cudaArray *gpu_array_deriv_x,
+                             cudaArray *gpu_array_deriv_y);
 
-    float *buff1;
-    float *buff2;
+        void processTracking(int nPoints);
 
-    float *gpu_smoothed_prev1_x;
-    float *gpu_smoothed_prev2_x;
-    float *gpu_smoothed_cur1_x;
-    float *gpu_smoothed_cur2_x;
+        void releaseMem();
 
-    float *gpu_smoothed_prev1;
-    float *gpu_smoothed_prev2;
-    float *gpu_smoothed_cur1;
-    float *gpu_smoothed_cur2;
+        void swapPyramids();
 
-    float *gpu_deriv_x;
-    float *gpu_deriv_y;
+        void setupTextures();
 
-    float *gpu_neighbourhood_det;
-    float *gpu_neighbourhood_Iyy;
-    float *gpu_neighbourhood_Ixy;
-    float *gpu_neighbourhood_Ixx;
+        void setSymbols(int pyr_level);
 
+        void computeDerivatives(const float *in,
+                                float       *deriv_buff_x,
+                                float       *deriv_buff_y,
+                                int         pyr_level,
+                                cudaArray   *gpu_array_deriv_x,
+                                cudaArray   *gpu_array_deriv_y);
 
+        void checkCUDAError(const char *msg);
 
-    // Texture buffers
-    cudaArray *gpu_array_pict_0;
-    cudaArray *gpu_array_pict_1;
-    cudaArray *gpu_array_pict_2;
-    cudaArray *gpu_array_pict_3;
+    private:
+        bool b_use_weighted_norm;
 
-    cudaArray *gpu_array_deriv_x_0;
-    cudaArray *gpu_array_deriv_y_0;
+        int w, h;
+        int _n_pyramids, _patch_radius, _max_points;
+        int pyr_w[LEVELS], pyr_h[LEVELS];
+        int _n_threads_x, _n_threads_y;
 
-    cudaArray *gpu_array_deriv_x_1;
-    cudaArray *gpu_array_deriv_y_1;
+        // TODO : cleanup using structures !
+        //
+        // |
+        // V
+        unsigned char *gpu_img_prev_RGB;
+        unsigned char *gpu_img_cur_RGB;
 
-    cudaArray *gpu_array_deriv_x_2;
-    cudaArray *gpu_array_deriv_y_2;
+        // 4-Frame tracking
+        unsigned char *gpu_img_prev1_RGB;
+        unsigned char *gpu_img_prev2_RGB;
 
-    cudaArray *gpu_array_deriv_x_3;
-    cudaArray *gpu_array_deriv_y_3;
-    // \4-Frame tracking
+        unsigned char *gpu_img_cur1_RGB;
+        unsigned char *gpu_img_cur2_RGB;
 
-    bool   b_mem_allocated;
-    bool   b_mem4_allocated;
-    bool   b_first_time;
+        // Picture buffers
+        float *gpu_img_pyramid_prev1[LEVELS];
+        float *gpu_img_pyramid_prev2[LEVELS];
+        float *gpu_img_pyramid_cur1[LEVELS];
+        float *gpu_img_pyramid_cur2[LEVELS];
 
-    float *gpu_smoothed_prev_x;
-    float *gpu_smoothed_cur_x;
-    float *gpu_smoothed_prev;
-    float *gpu_smoothed_cur;
+        float *gpu_sobel_prev1;
+        float *gpu_sobel_prev2;
+        float *gpu_sobel_cur1;
+        float *gpu_sobel_cur2;
 
-    float *gpu_pt_indexes;  // Indexes of the points to follow
+        float *buff1;
+        float *buff2;
 
+        float *gpu_smoothed_prev1_x;
+        float *gpu_smoothed_prev2_x;
+        float *gpu_smoothed_cur1_x;
+        float *gpu_smoothed_cur2_x;
 
-    cudaArray *gpu_array_pyramid_prev;
-    cudaArray *gpu_array_pyramid_prev_Ix;
-    cudaArray *gpu_array_pyramid_prev_Iy;
-    cudaArray *gpu_array_pyramid_cur;
+        float *gpu_smoothed_prev1;
+        float *gpu_smoothed_prev2;
+        float *gpu_smoothed_cur1;
+        float *gpu_smoothed_cur2;
 
-    float   *gpu_dx, *gpu_dy;
-    float   *gpu_dx1, *gpu_dy1;
-    float   *gpu_dx2, *gpu_dy2;
-    float   *gpu_dx3, *gpu_dy3;
+        float *gpu_deriv_x;
+        float *gpu_deriv_y;
 
-    char    *gpu_status;
-
-    timespec diffTime(timespec start, timespec end);
+        float *gpu_neighbourhood_det;
+        float *gpu_neighbourhood_Iyy;
+        float *gpu_neighbourhood_Ixy;
+        float *gpu_neighbourhood_Ixx;
 
 
 
-  public:
-    /*!
-     * \brief cudaLK
-     */
-    cudaLK();
+        // Texture buffers
+        cudaArray *gpu_array_pict_0;
+        cudaArray *gpu_array_pict_1;
+        cudaArray *gpu_array_pict_2;
+        cudaArray *gpu_array_pict_3;
 
-    /*!
-     * \brief cudaLK
-     * \param levels
-     * \param patch_radius
-     */
-    cudaLK(int n_pyramids, int patch_radius, int n_max_points, bool weighted_norm);
+        cudaArray *gpu_array_deriv_x_0;
+        cudaArray *gpu_array_deriv_y_0;
 
-    ~cudaLK();
+        cudaArray *gpu_array_deriv_x_1;
+        cudaArray *gpu_array_deriv_y_1;
 
-    /*!
-     * \brief resetDisplacements
-     * Resets the displacement arrays to 0
-     */
-    void resetDisplacements();
+        cudaArray *gpu_array_deriv_x_2;
+        cudaArray *gpu_array_deriv_y_2;
+
+        cudaArray *gpu_array_deriv_x_3;
+        cudaArray *gpu_array_deriv_y_3;
+        // \4-Frame tracking
+
+        bool   b_mem_allocated;
+        bool   b_mem4_allocated;
+        bool   b_first_time;
+
+        float *gpu_smoothed_prev_x;
+        float *gpu_smoothed_cur_x;
+        float *gpu_smoothed_prev;
+        float *gpu_smoothed_cur;
+
+        float *gpu_pt_indexes;  // Indexes of the points to follow
 
 
-    /*!
-     * \brief run4Frames
-     * \param cur1
-     * \param cur2
-     * \param _w
-     * \param _h
-     * \param pt_to_track
-     * \param n_pts
-     * \param patch_R
-     * \param b_CvtToGrey
-     */
-    void run4Frames(IplImage *cur1, IplImage *cur2, float *pt_to_track, int  n_pts, bool b_CvtToGrey) ;
+        cudaArray *gpu_array_pyramid_prev;
+        cudaArray *gpu_array_pyramid_prev_Ix;
+        cudaArray *gpu_array_pyramid_prev_Iy;
+        cudaArray *gpu_array_pyramid_cur;
 
-    /*!
-     * \brief loadBackPictures
-     * \param prev1
-     * \param prev2
-     * \param _w
-     * \param _h
-     * \param b_CvtToGrey
-     */
-    void loadBackPictures(const IplImage *prev1, const IplImage *prev2, bool b_CvtToGrey);
+        float   *gpu_dx, *gpu_dy;
+        float   *gpu_dx1, *gpu_dy1;
+        float   *gpu_dx2, *gpu_dy2;
+        float   *gpu_dx3, *gpu_dy3;
 
-    /*!
-     * \brief loadCurPictures
-     * \param cur1
-     * \param cur2
-     * \param _w
-     * \param _h
-     * \param b_CvtToGrey
-     */
-    void loadCurPictures(const IplImage *cur1, const IplImage *cur2, bool b_CvtToGrey);
+        char    *gpu_status;
 
-    /*!
-     * \brief exportDebug
-     * \param outPict
-     */
-    void exportDebug(IplImage *outPict);
+        timespec diffTime(timespec start, timespec end);
 
-    /*!
-     * \brief sobelFiltering : Compute the Sobel gradient picture using kernels
-     * \param pict_in
-     * \param pict_out
-     */
-    void sobelFiltering(const float *pict_in,
-                        const int w,
-                        const int h,
-                        float *pict_out);
+    public:
 
-    /*!
-     * \brief sobelFiltering : Compute the Sobel gradient picture using kernels
-     * \param pict_in
-     * \param pict_out
-     */
-    void sobelFilteringX(const float *pict_in,
-                         const int w,
-                         const int h,
-                         float *pict_out);
+        float *dx1, *dx2, *dx3, *dx4;
+        float *dy1, *dy2, *dy3, *dy4;
 
-    /*!
-     * \brief sobelFiltering : Compute the Sobel gradient picture using kernels
-     * \param pict_in
-     * \param pict_out
-     */
-    void sobelFilteringY(const float *pict_in,
-                         const int w,
-                         const int h,
-                         float *pict_out);
-
-    /*!
-     * \brief dummyCall
-     */
-    void dummyCall();
-
-    /*!
-     * Coordinates of the tracked points
-     */
-    float *dx1, *dx2, *dx3, *dx4;
-    float *dy1, *dy2, *dy3, *dy4;
-
-    char *status;
+        char *status;
 };
 
 #endif
