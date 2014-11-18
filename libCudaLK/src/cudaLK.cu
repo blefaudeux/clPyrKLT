@@ -38,17 +38,6 @@ const float scaling[] = {1, 0.5f, 0.25f, 0.125f, 0.0625f, 0.03125f, 0.015625f, 0
 // ----------------------------------------------------------------------
 
 
-
-// Possible weight coefficients for tracking cost evaluation :
-// Gaussian discretisation
-/*
- *       1  4  6  4  1
- *       4 16 24 16  4
- *       6 24 36 24  6
- *       4 16 24 16  4
- *       1  4  6  4  1
- */
-
 // Compute clock time
 timespec cudaLK::diffTime(timespec start, timespec end)
 {
@@ -64,7 +53,7 @@ timespec cudaLK::diffTime(timespec start, timespec end)
 }
 
 // Compute divUp / Useful for kernel job repartition
-int iDivUp( int a,  int b )
+inline int iDivUp( int a,  int b )
 {
     return (a % b != 0) ? (a / b + 1) : (a / b);
 }
@@ -150,14 +139,14 @@ void cudaLK::buildPyramids()
 
     // Build pyramids
     for(int i=0; i < _n_pyramids-1; i++) {
-        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_prev1[i], pyr_w[i], pyr_h[i], gpu_smoothed_prev1_x);
-        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_prev2[i], pyr_w[i], pyr_h[i], gpu_smoothed_prev2_x);
+        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_cur1[i], pyr_w[i], pyr_h[i], gpu_smoothed_cur1_x);
+        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_cur2[i], pyr_w[i], pyr_h[i], gpu_smoothed_cur2_x);
 
-        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_prev1_x, pyr_w[i], pyr_h[i], gpu_smoothed_prev1);
-        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_prev2_x, pyr_w[i], pyr_h[i], gpu_smoothed_prev2);
+        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_cur1_x, pyr_w[i], pyr_h[i], gpu_smoothed_cur1);
+        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_cur2_x, pyr_w[i], pyr_h[i], gpu_smoothed_cur2);
 
-        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_prev1, pyr_w[i], pyr_h[i], gpu_img_pyramid_prev1[i+1], pyr_w[i+1], pyr_h[i+1]);
-        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_prev2, pyr_w[i], pyr_h[i], gpu_img_pyramid_prev2[i+1], pyr_w[i+1], pyr_h[i+1]);
+        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_cur1, pyr_w[i], pyr_h[i], gpu_img_pyramid_cur1[i+1], pyr_w[i+1], pyr_h[i+1]);
+        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_cur2, pyr_w[i], pyr_h[i], gpu_img_pyramid_cur2[i+1], pyr_w[i+1], pyr_h[i+1]);
     }
 }
 
@@ -524,23 +513,23 @@ void cudaLK::fillDerivatives(float **pict_pyramid,
     }
 }
 
-void cudaLK::loadBackPictures(const IplImage *prev1,
-                              const IplImage *prev2,
-                              bool b_CvtToGrey) {
 
-    // Load initial pictures to be used in backbuffers (and allocate memory if nedded)
-    // Just called once
-
+// Load current pair of pictures
+// Called every time
+void cudaLK::loadPictures( const IplImage *img1,
+                           const IplImage *img2,
+                           bool b_CvtToGrey )
+{
     // Allocate memory if needed
     if (!b_mem4_allocated) {
-        w = prev1->width;
-        h = prev1->height;
+        w = img1->width;
+        h = img1->height;
 
         // Initiate constant memory variables
-        cudaMemcpyToSymbol (LK_width, &w, sizeof(w));
-        cudaMemcpyToSymbol (LK_height, &h, sizeof(h));
+        cudaMemcpyToSymbol( LK_width, &w, sizeof(w) );
+        cudaMemcpyToSymbol( LK_height, &h, sizeof(h) );
 
-        initMem4Frame ();
+        initMem4Frame();
 
         int n_iterations  = MAX_ITERATIONS;
         float threshold   = MV_THRESHOLD;
@@ -555,85 +544,26 @@ void cudaLK::loadBackPictures(const IplImage *prev1,
             this->b_use_weighted_norm = false;
         }
 
-        if (this->b_use_weighted_norm) {
-            for (int i = -w; i<= w; ++i) {
-                for (int j = -h; j<= h; ++j) {
+        if ( b_use_weighted_norm )
+        {
+            for (int i = -w; i<= w; ++i)
+            {
+                for (int j = -h; j<= h; ++j)
+                {
                     temp_weight_array[i + j*w] = exp (-(i*j)/10.f); // TODO : handle std settings gracefully..
                 }
             }
 
             cudaMemcpyToSymbol (LK_Weight, &temp_weight_array, w*h*sizeof(float), cudaMemcpyHostToDevice);
         }
+        checkCUDAError("LoadPictures - set symbols");
     }
-    checkCUDAError("LoadBackPicture - set symbols");
 
-    // Transfer from host memspace to gpu memspace
-    if (b_CvtToGrey) {
-        cudaMemcpy2D (gpu_img_prev1_RGB, w*sizeof(uchar), prev1->imageData, prev1->widthStep, 3 * prev1->width * sizeof(uchar), prev1->height, cudaMemcpyHostToDevice );
-        cudaMemcpy2D (gpu_img_prev2_RGB, w*sizeof(uchar), prev2->imageData, prev2->widthStep, 3 * prev2->width * sizeof(uchar), prev2->height, cudaMemcpyHostToDevice );
-    } else {
-        cudaMemcpy2D (gpu_img_prev1_RGB, w*sizeof(uchar), prev1->imageData, prev1->widthStep, prev1->width * sizeof(uchar), prev1->height, cudaMemcpyHostToDevice );
-        cudaMemcpy2D (gpu_img_prev2_RGB, w*sizeof(uchar), prev2->imageData, prev2->widthStep, prev2->width * sizeof(uchar), prev2->height, cudaMemcpyHostToDevice );
-    }
-    checkCUDAError("LoadBackPicture");
+    // Swap the pictures & pyramids (current -> back)
+    swapPyramids();
 
-
-    // Convert picture to floats & grey
-    cvtPicture(false, b_CvtToGrey);
-    buildPyramids();
-    checkCUDAError("pyrDownsample");
-
-    // Load cudaArray buffer from pyramids
-    int pyr_offset = 0;
-    for (int l=0; l<_n_pyramids; ++l) {
-        cudaMemcpy2DToArrayAsync (gpu_array_pict_0,
-                                  pyr_offset * sizeof(float),
-                                  0,
-                                  gpu_img_pyramid_prev1[l],
-                                  sizeof(float)*pyr_w[l],
-                                  sizeof(float)*pyr_w[l],
-                                  pyr_h[l],
-                                  cudaMemcpyDeviceToDevice);
-
-        cudaMemcpy2DToArrayAsync(gpu_array_pict_1,
-                                 pyr_offset * sizeof(float),
-                                 0,
-                                 gpu_img_pyramid_prev2[l],
-                                 sizeof(float)*pyr_w[l],
-                                 sizeof(float)*pyr_w[l],
-                                 pyr_h[l],
-                                 cudaMemcpyDeviceToDevice);
-
-        pyr_offset += pyr_w[l];
-    }
-    checkCUDAError("Fill in pict buffers");
-
-    // Fill in derivatives, for the two pictures :
-    fillDerivatives(gpu_img_pyramid_prev1,
-                    gpu_array_deriv_x_0,
-                    gpu_array_deriv_y_0);
-
-    fillDerivatives(gpu_img_pyramid_prev2,
-                    gpu_array_deriv_x_1,
-                    gpu_array_deriv_y_1);
-
-    checkCUDAError("Computing derivatives");
-
-    cudaMemset(gpu_status, 0, sizeof(char) * MAX_POINTS); // Not ready to track
-    printf("CUDA : back pictures loaded %d x %d \n", w, h);
-}
-
-
-// Load current pair of pictures
-// Called every time
-void cudaLK::loadCurPictures(const IplImage *cur1,
-                             const IplImage *cur2,
-                             bool b_CvtToGrey) {
-
-    if (!this->b_mem4_allocated) {
-        printf("CUDA : error - memory must be allocated before use\n");
-        return;
-    } else if ( (cur1->width != w) || (cur1->height !=h) ) {
+    if ( (img1->width != w) || (img1->height !=h) )
+    {
         printf("CUDA : error - pictures must have the same size\n");
         return;
     }
@@ -645,30 +575,20 @@ void cudaLK::loadCurPictures(const IplImage *cur1,
 
     // Transfer from host memspace to gpu memspace
     if (b_CvtToGrey) {
-        cudaMemcpy2D (gpu_img_cur1_RGB, w*sizeof(uchar), cur1->imageData, cur1->widthStep, 3 * cur1->width * sizeof(uchar), cur1->height, cudaMemcpyHostToDevice );
-        cudaMemcpy2D (gpu_img_cur2_RGB, w*sizeof(uchar), cur2->imageData, cur2->widthStep, 3 * cur2->width * sizeof(uchar), cur2->height, cudaMemcpyHostToDevice );
+        cudaMemcpy2D (gpu_img_cur1_RGB, w*sizeof(uchar), img1->imageData, img1->widthStep, 3 * img1->width * sizeof(uchar), img1->height, cudaMemcpyHostToDevice );
+        cudaMemcpy2D (gpu_img_cur2_RGB, w*sizeof(uchar), img2->imageData, img2->widthStep, 3 * img2->width * sizeof(uchar), img2->height, cudaMemcpyHostToDevice );
     } else {
-        cudaMemcpy2D (gpu_img_cur1_RGB, w*sizeof(uchar), cur1->imageData, cur1->widthStep, cur1->width * sizeof(uchar), cur1->height, cudaMemcpyHostToDevice );
-        cudaMemcpy2D (gpu_img_cur2_RGB, w*sizeof(uchar), cur2->imageData, cur2->widthStep, cur2->width * sizeof(uchar), cur2->height, cudaMemcpyHostToDevice );
+        cudaMemcpy2D (gpu_img_cur1_RGB, w*sizeof(uchar), img1->imageData, img1->widthStep, img1->width * sizeof(uchar), img1->height, cudaMemcpyHostToDevice );
+        cudaMemcpy2D (gpu_img_cur2_RGB, w*sizeof(uchar), img2->imageData, img2->widthStep, img2->width * sizeof(uchar), img2->height, cudaMemcpyHostToDevice );
     }
+    checkCUDAError("copyToGPU");
 
-    checkCUDAError("pictCopyToGPU");
-
-    // Convert picture to floats & grey
+    // Initial pipeline processing
     cvtPicture(true, b_CvtToGrey);
     checkCUDAError("pictConversion");
 
-    // Build pyramids
-    for(int i=0; i < _n_pyramids-1; i++) {
-        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_cur1[i], pyr_w[i], pyr_h[i], gpu_smoothed_cur1_x);
-        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_cur2[i], pyr_w[i], pyr_h[i], gpu_smoothed_cur2_x);
-
-        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_cur1_x, pyr_w[i], pyr_h[i], gpu_smoothed_cur1);
-        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_cur2_x, pyr_w[i], pyr_h[i], gpu_smoothed_cur2);
-
-        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_cur1, pyr_w[i], pyr_h[i], gpu_img_pyramid_cur1[i+1], pyr_w[i+1], pyr_h[i+1]);
-        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_cur2, pyr_w[i], pyr_h[i], gpu_img_pyramid_cur2[i+1], pyr_w[i+1], pyr_h[i+1]);
-    }
+    buildPyramids();
+    checkCUDAError("pictConversion");
 
     // Load cudaArray buffer from pyramids
     int pyr_offset = 0;
@@ -702,10 +622,11 @@ void cudaLK::loadCurPictures(const IplImage *cur1,
     fillDerivatives(gpu_img_pyramid_cur2,
                     gpu_array_deriv_x_2,
                     gpu_array_deriv_y_2);
+    checkCUDAError("Computing derivatives");
 
     cudaMemset(gpu_status, 1, sizeof(char) * MAX_POINTS); // Ready to track
 
-    checkCUDAError("Pyramid building");
+    checkCUDAError("picture load");
 }
 
 void cudaLK::processTracking( int nPoints )
@@ -915,7 +836,7 @@ void cudaLK::run4Frames( IplImage  *cur1,
     int win_size_short = 2;
 
     // Load current pictures & build pyramids
-    loadCurPictures(cur1, cur2, cvtToGrey);
+    loadPictures(cur1, cur2, cvtToGrey);
 
     // Load the coordinates of the points to track & define some settings
     cudaMemcpy(gpu_pt_indexes, pt_to_track, 2 * n_pts_ceil * sizeof(float), cudaMemcpyHostToDevice);

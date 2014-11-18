@@ -55,17 +55,24 @@ class cudaLK
     public:
         cudaLK();
 
-        cudaLK(int n_pyramids, int patch_radius, int n_max_points, bool weighted_norm);
+        cudaLK( int n_pyramids,
+                int patch_radius,
+                int n_max_points,
+                bool weighted_norm);
 
         ~cudaLK();
 
         void resetDisplacements();
 
-        void run4Frames(IplImage *cur1, IplImage *cur2, float *pt_to_track, int  nPoints, bool cvtToGrey) ;
+        void run4Frames(IplImage *cur1,
+                        IplImage *cur2,
+                        float *pt_to_track,
+                        int  nPoints,
+                        bool cvtToGrey);
 
-        void loadBackPictures(const IplImage *prev1, const IplImage *prev2, bool b_CvtToGrey);
-
-        void loadCurPictures(const IplImage *cur1, const IplImage *cur2, bool b_CvtToGrey);
+        void loadPictures(const IplImage *img1,
+                          const IplImage *img2,
+                          bool b_CvtToGrey );
 
         void exportDebug(IplImage *outPict);
 

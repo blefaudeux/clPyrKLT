@@ -3,6 +3,17 @@
 #include <cuda_runtime.h>
 
 
+// Possible weight coefficients for tracking cost evaluation :
+// Gaussian discretisation
+/*
+ *       1  4  6  4  1
+ *       4 16 24 16  4
+ *       6 24 36 24  6
+ *       4 16 24 16  4
+ *       1  4  6  4  1
+ */
+
+
 // Compute spatial derivatives using Scharr operator - Naive implementation..
 __global__ void kernelScharrX( float const *in, int _w, int _h, float *out) {
     // Pattern : // Indexes :
