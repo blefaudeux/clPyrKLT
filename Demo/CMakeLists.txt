@@ -5,7 +5,6 @@ cmake_minimum_required(VERSION 2.6)
 
 # Add all the files we're interested in (mostly for QTCreator)
 file(GLOB SRC ${PROJECT_SOURCE_DIR}/*.cpp)
-#file(GLOB HEADERS ${PROJECT_SOURCE_DIR}/headers/*.h)
 
 # Set debug or release configurations
 if( CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]" )
@@ -23,11 +22,11 @@ endif()
 # Get the needed lib and includes:
 find_package(OpenCV REQUIRED)
 
-find_path(CUDALK_INCLUDE_DIR PTAM/System.h
+find_path(CUDALK_INCLUDE_DIR cudaLK/headers/*.h
           HINTS "/usr/local/include"
-          PATH_SUFFIXES PTAM)
+          PATH_SUFFIXES libCudaLK)
 
-set (CUDALK_INCLUDE_DIR ${PTAM_INCLUDE_DIR}/PTAM)
+set (CUDALK_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/libCudaLK)
 
 find_library(CUDALK_LIBRARY NAMES CUDALKd libCUDALKd
              HINTS "/usr/local/lib")
@@ -65,10 +64,10 @@ message("Source files : ${SRC}")
 add_executable(demoCudaLK ${SRC})
 
 if( CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" )
-  set_target_properties(demoPTAM PROPERTIES COMPILE_FLAGS "-fPIC")
+  set_target_properties(demoCudaLK PROPERTIES COMPILE_FLAGS "-fPIC")
 endif( CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" )
 
-target_link_libraries(demoPTAM PTAMs  ${LINK_LIBS})
+target_link_libraries(demoCudaLK libCUDALK  ${LINK_LIBS})
 
 ### Define the installation procedure
 #install(TARGETS exe DESTINATION folder)
