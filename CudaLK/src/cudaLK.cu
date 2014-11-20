@@ -58,20 +58,17 @@ inline int iDivUp( int a,  int b )
     return (a % b != 0) ? (a / b + 1) : (a / b);
 }
 
-
-
-
 cudaLK::cudaLK()
 {
     // Use default values for pyramid levels & LK search radius
-    _n_pyramids     = LEVELS;
-    _patch_radius   = PATCH_R;
-    _max_points     = MAX_POINTS;
-    _n_threads_x    = NTHREAD_X;
-    _n_threads_y    = NTHREAD_Y;
+    m_nPyramids     = LEVELS;
+    m_patchRadius   = PATCH_R;
+    m_maxPoints     = MAX_POINTS;
+    m_nThX    = NTHREAD_X;
+    m_nThY    = NTHREAD_Y;
 
-    cudaMemcpyToSymbol (LK_patch, &_patch_radius, sizeof(int));   // in device constant memory
-    cudaMemcpyToSymbol (LK_points, &_max_points, sizeof(int));
+    cudaMemcpyToSymbol (LK_patch, &m_patchRadius, sizeof(int));
+    cudaMemcpyToSymbol (LK_points, &m_maxPoints, sizeof(int));
 
     // Init flags
     b_mem_allocated   = false;
@@ -89,14 +86,14 @@ cudaLK::cudaLK( int n_pyramids,
     // Call initMem() or initMem4Frame()
 
     // Specify pyramid levels and LK search radius
-    _n_pyramids     = n_pyramids;
-    _patch_radius   = patch_radius;
-    _max_points     = n_max_points;
-    _n_threads_x    = NTHREAD_X;
-    _n_threads_y    = NTHREAD_Y;
+    m_nPyramids     = n_pyramids;
+    m_patchRadius   = patch_radius;
+    m_maxPoints     = n_max_points;
+    m_nThX    = NTHREAD_X;
+    m_nThY    = NTHREAD_Y;
 
-    cudaMemcpyToSymbol (LK_patch, &_patch_radius, sizeof(int));   // in device constant memory
-    cudaMemcpyToSymbol (LK_points, &_max_points, sizeof(int));
+    cudaMemcpyToSymbol (LK_patch, &m_patchRadius, sizeof(int));   // in device constant memory
+    cudaMemcpyToSymbol (LK_points, &m_maxPoints, sizeof(int));
 
 
     // Init flags
@@ -132,21 +129,21 @@ void cudaLK::bindTextureUnits( cudaArray *pict0,
 void cudaLK::buildPyramids()
 {
     // 1D & 2D-indexing of kernels
-    int blocksW = w/_n_threads_x + ((w % _n_threads_x)?1:0);
-    int blocksH = h/_n_threads_y + ((h % _n_threads_y )?1:0);
+    int blocksW = m_width/m_nThX + ((m_width % m_nThX)?1:0);
+    int blocksH = m_height/m_nThY + ((m_height % m_nThY )?1:0);
     dim3 blocks(blocksW, blocksH);
-    dim3 threads(_n_threads_x, _n_threads_y);
+    dim3 threads(m_nThX, m_nThY);
 
     // Build pyramids
-    for(int i=0; i < _n_pyramids-1; i++) {
-        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_cur1[i], pyr_w[i], pyr_h[i], gpu_smoothed_cur1_x);
-        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_cur2[i], pyr_w[i], pyr_h[i], gpu_smoothed_cur2_x);
+    for(int i=0; i < m_nPyramids-1; i++) {
+        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_cur1[i], m_pyrW[i], m_pyrH[i], gpu_smoothed_cur1_x);
+        kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_cur2[i], m_pyrW[i], m_pyrH[i], gpu_smoothed_cur2_x);
 
-        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_cur1_x, pyr_w[i], pyr_h[i], gpu_smoothed_cur1);
-        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_cur2_x, pyr_w[i], pyr_h[i], gpu_smoothed_cur2);
+        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_cur1_x, m_pyrW[i], m_pyrH[i], gpu_smoothed_cur1);
+        kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_cur2_x, m_pyrW[i], m_pyrH[i], gpu_smoothed_cur2);
 
-        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_cur1, pyr_w[i], pyr_h[i], gpu_img_pyramid_cur1[i+1], pyr_w[i+1], pyr_h[i+1]);
-        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_cur2, pyr_w[i], pyr_h[i], gpu_img_pyramid_cur2[i+1], pyr_w[i+1], pyr_h[i+1]);
+        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_cur1, m_pyrW[i], m_pyrH[i], gpu_img_pyramid_cur1[i+1], m_pyrW[i+1], m_pyrH[i+1]);
+        pyrDownsample<<<blocks, threads>>>(gpu_smoothed_cur2, m_pyrW[i], m_pyrH[i], gpu_img_pyramid_cur2[i+1], m_pyrW[i+1], m_pyrH[i+1]);
     }
 }
 
@@ -175,7 +172,7 @@ void cudaLK::computeDerivatives(float const *in,
     // 2D-indexing for kernel managements
     int _n_threads_x = NTHREAD_X;
     int _n_threads_y = NTHREAD_Y;
-    int _w = pyr_w[pyr_level], _h=pyr_h[pyr_level];
+    int _w = m_pyrW[pyr_level], _h=m_pyrH[pyr_level];
 
     int blocksW = _w/_n_threads_x + ((_w % _n_threads_x)?1:0);
     int blocksH = _h/_n_threads_y + ((_h % _n_threads_y)?1:0);
@@ -194,7 +191,7 @@ void cudaLK::computeDerivatives(float const *in,
 
     for (int i=0; i<pyr_level; ++i)
     {
-        offset += pyr_w[i];
+        offset += m_pyrW[i];
     }
 
     cudaMemcpy2DToArrayAsync(gpu_array_deriv_x,
@@ -220,29 +217,29 @@ void cudaLK::computeDerivatives(float const *in,
 
 void cudaLK::cvtPicture(bool useCurrent, bool cvtToGrey)
 {
-    int blocks1D = (w*h)/256 + (w*h % 256?1:0); // for greyscale
+    int blocks1D = (m_width*m_height)/256 + (m_width*m_height % 256?1:0); // for greyscale
 
     if (useCurrent)
     {
         if (cvtToGrey) {
             // RGB -> grey
-            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_cur1_RGB, gpu_img_pyramid_cur1[0], w*h);
-            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_cur2_RGB, gpu_img_pyramid_cur2[0], w*h);
+            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_cur1_RGB, gpu_img_pyramid_cur1[0], m_width*m_height);
+            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_cur2_RGB, gpu_img_pyramid_cur2[0], m_width*m_height);
         } else {
-            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_cur1_RGB, gpu_img_pyramid_cur1[0], w*h);
-            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_cur2_RGB, gpu_img_pyramid_cur2[0], w*h);
+            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_cur1_RGB, gpu_img_pyramid_cur1[0], m_width*m_height);
+            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_cur2_RGB, gpu_img_pyramid_cur2[0], m_width*m_height);
         }
     }
     else
     {
         if (cvtToGrey) {
             // RGB -> grey
-            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_prev1_RGB, gpu_img_pyramid_prev1[0], w*h);
-            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_prev2_RGB, gpu_img_pyramid_prev2[0], w*h);
+            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_prev1_RGB, gpu_img_pyramid_prev1[0], m_width*m_height);
+            convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_prev2_RGB, gpu_img_pyramid_prev2[0], m_width*m_height);
             checkCUDAError("convertRGBToGrey");
         } else {
-            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_prev1_RGB, gpu_img_pyramid_prev1[0], w*h);
-            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_prev2_RGB, gpu_img_pyramid_prev2[0], w*h);
+            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_prev1_RGB, gpu_img_pyramid_prev1[0], m_width*m_height);
+            convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_prev2_RGB, gpu_img_pyramid_prev2[0], m_width*m_height);
             checkCUDAError("convertToFloat");
         }
     }
@@ -253,28 +250,28 @@ void cudaLK::exportDebug(IplImage *outPict) {
     // Not reliable for IPLImages because of widthStep --> TODO ?
 
     // Copy buffer back to host
-    float pict_x_f[w*h];
+    float pict_x_f[m_width*m_height];
     //  float pict_y_f[w*h];
 
     // SOBEL
-    cudaMemcpy (pict_x_f, gpu_img_pyramid_prev1[0], w*h*sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy (pict_x_f, gpu_img_pyramid_prev1[0], m_width*m_height*sizeof(float), cudaMemcpyDeviceToHost);
     //  cudaMemcpy (pict_x_f, gpu_img_pyramid_cur1[0], w*h*sizeof(float), cudaMemcpyDeviceToHost);
 
     // Get picture max value
     float val = 0.f;
     float max_val = 0.f;
-    for (int i = 0; i<w; ++i) {
-        for (int j=0; j<h; ++j) {
-            val = pict_x_f[i +j*w];
+    for (int i = 0; i<m_width; ++i) {
+        for (int j=0; j<m_height; ++j) {
+            val = pict_x_f[i +j*m_width];
             if (val > max_val)
                 max_val = val;
         }
     }
 
     // Convert to char
-    for (int i = 0; i<w; ++i) {
-        for (int j=0; j<h; ++j) {
-            val = pict_x_f[i +j*w];
+    for (int i = 0; i<m_width; ++i) {
+        for (int j=0; j<m_height; ++j) {
+            val = pict_x_f[i +j*m_width];
             outPict->imageData[i +j*outPict->widthStep] = (unsigned char) round(val/max_val*254);
         }
     }
@@ -315,24 +312,21 @@ void cudaLK::exportDebug(IplImage *outPict) {
 void cudaLK::initMem()
 {
     // Picture buffers
-    cudaMalloc((void**)&gpu_img_prev_RGB, sizeof(char)*w*h*3);
-    cudaMalloc((void**)&gpu_img_cur_RGB, sizeof(char)*w*h*3);
+    cudaMalloc((void**)&gpu_img_pyramid_prev1[0], sizeof(float)*m_width*m_height);
+    cudaMalloc((void**)&gpu_img_pyramid_cur1[0], sizeof(float)*m_width*m_height);
 
-    cudaMalloc((void**)&gpu_img_pyramid_prev1[0], sizeof(float)*w*h);
-    cudaMalloc((void**)&gpu_img_pyramid_cur1[0], sizeof(float)*w*h);
+    cudaMalloc((void**)&gpu_smoothed_prev_x, sizeof(float)*m_width*m_height);
+    cudaMalloc((void**)&gpu_smoothed_cur_x, sizeof(float)*m_width*m_height);
 
-    cudaMalloc((void**)&gpu_smoothed_prev_x, sizeof(float)*w*h);
-    cudaMalloc((void**)&gpu_smoothed_cur_x, sizeof(float)*w*h);
-
-    cudaMalloc((void**)&gpu_smoothed_prev, sizeof(float)*w*h);
-    cudaMalloc((void**)&gpu_smoothed_cur, sizeof(float)*w*h);
+    cudaMalloc((void**)&gpu_smoothed_prev, sizeof(float)*m_width*m_height);
+    cudaMalloc((void**)&gpu_smoothed_cur, sizeof(float)*m_width*m_height);
 
     // Indexes
     cudaMalloc ((void**) &gpu_pt_indexes, 2*MAX_POINTS*sizeof(float));
 
     // Texture
-    cudaMallocArray(&gpu_array_pyramid_prev, &texRef_pyramid_prev.channelDesc, w, h);
-    cudaMallocArray(&gpu_array_pyramid_cur, &texRef_pyramid_cur.channelDesc, w, h);
+    cudaMallocArray(&gpu_array_pyramid_prev, &texRef_pyramid_prev.channelDesc, m_width, m_height);
+    cudaMallocArray(&gpu_array_pyramid_cur, &texRef_pyramid_cur.channelDesc, m_width, m_height);
 
     cudaBindTextureToArray(texRef_pyramid_prev, gpu_array_pyramid_prev, texRef_pyramid_prev.channelDesc);
     cudaBindTextureToArray(texRef_pyramid_cur,  gpu_array_pyramid_cur,  texRef_pyramid_cur.channelDesc);
@@ -347,26 +341,26 @@ void cudaLK::initMem()
     texRef_pyramid_cur.addressMode[0] = cudaAddressModeClamp;
     texRef_pyramid_cur.addressMode[1] = cudaAddressModeClamp;
 
-    cudaMalloc((void**)&gpu_dx, sizeof(float)*w*h);
-    cudaMalloc((void**)&gpu_dy, sizeof(float)*w*h);
-    cudaMalloc((void**)&gpu_status, sizeof(char)*w*h);
+    cudaMalloc((void**)&gpu_dx, sizeof(float)*m_width*m_height);
+    cudaMalloc((void**)&gpu_dy, sizeof(float)*m_width*m_height);
+    cudaMalloc((void**)&gpu_status, sizeof(char)*m_width*m_height);
 
-    int _w = w;
-    int _h = h;
+    int _w = m_width;
+    int _h = m_height;
 
-    dx1 = new float[w*h];
-    dy1 = new float[w*h];
-    status = new char[w*h];
+    dx1 = new float[m_width*m_height];
+    dy1 = new float[m_width*m_height];
+    status = new char[m_width*m_height];
 
-    pyr_w[0] = w;
-    pyr_h[0] = h;
+    m_pyrW[0] = m_width;
+    m_pyrH[0] = m_height;
 
-    for(int i=1; i < _n_pyramids; ++i)
+    for(int i=1; i < m_nPyramids; ++i)
     {
         _w /= 2;
         _h /= 2;
-        pyr_w[i] = _w;
-        pyr_h[i] = _h;
+        m_pyrW[i] = _w;
+        m_pyrH[i] = _h;
 
         cudaMalloc((void**)&gpu_img_pyramid_prev1[i], sizeof(float)*_w*_h);
         cudaMalloc((void**)&gpu_img_pyramid_cur1[i], sizeof(float)*_w*_h);
@@ -378,32 +372,21 @@ void cudaLK::initMem()
 
 void cudaLK::initMem4Frame()
 {
-    // Allocate picture buffers
-    cudaMalloc((void**)&gpu_img_prev1_RGB,  sizeof(char) * w * h * 3);
-    cudaMalloc((void**)&gpu_img_prev2_RGB,  sizeof(char) * w * h * 3);
-    cudaMalloc((void**)&gpu_img_cur1_RGB,   sizeof(char) * w * h * 3);
-    cudaMalloc((void**)&gpu_img_cur2_RGB,   sizeof(char) * w * h * 3);
+    // Allocate all the picture workspaces
+    std::vector<PictWorkspace *> buffers;
+    buffers.push_back( &m_imgCur1 );
+    buffers.push_back( &m_imgCur2 );
+    buffers.push_back( &m_imgPrev1 );
+    buffers.push_back( &m_imgPrev2 );
 
-    // Allocate Pyramids
-    cudaMalloc((void**)&gpu_img_pyramid_prev1[0], sizeof(float) * w * h);
-    cudaMalloc((void**)&gpu_img_pyramid_prev2[0], sizeof(float) * w * h);
-    cudaMalloc((void**)&gpu_img_pyramid_cur1[0],  sizeof(float) * w * h);
-    cudaMalloc((void**)&gpu_img_pyramid_cur2[0],  sizeof(float) * w * h);
-
-    // Allocate smoothed pictures (for pyramid building)
-    cudaMalloc((void**)&gpu_smoothed_prev1_x, sizeof(float) * w * h);
-    cudaMalloc((void**)&gpu_smoothed_prev2_x, sizeof(float) * w * h);
-    cudaMalloc((void**)&gpu_smoothed_cur1_x,  sizeof(float) * w * h);
-    cudaMalloc((void**)&gpu_smoothed_cur2_x,  sizeof(float) * w * h);
-
-    cudaMalloc((void**)&gpu_smoothed_prev1, sizeof(float) * w * h);
-    cudaMalloc((void**)&gpu_smoothed_prev2, sizeof(float) * w * h);
-    cudaMalloc((void**)&gpu_smoothed_cur1 , sizeof(float) * w * h);
-    cudaMalloc((void**)&gpu_smoothed_cur2 , sizeof(float) * w * h);
+    for (int i=0; i< buffers.size(); ++i)
+    {
+        buffers[i]->allocate( m_width, m_height, m_nPyramids );
+    }
 
     // Allocate spatial derivatives & pict buffer
-    cudaMalloc((void**)&gpu_deriv_x,   sizeof(float) * w * h);
-    cudaMalloc((void**)&gpu_deriv_y,   sizeof(float) * w * h);
+    cudaMalloc((void**)&gpu_deriv_x,   sizeof(float) * m_width * m_height);
+    cudaMalloc((void**)&gpu_deriv_y,   sizeof(float) * m_width * m_height);
 
     // Allocate LK compute intermediates :
     cudaMalloc((void **) &gpu_neighbourhood_det, sizeof(float) * MAX_POINTS);
@@ -412,22 +395,22 @@ void cudaLK::initMem4Frame()
     cudaMalloc((void **) &gpu_neighbourhood_Ixx, sizeof(float) * MAX_POINTS);
 
     // Indexes
-    cudaMalloc ((void**) &gpu_pt_indexes , 2 * MAX_POINTS * sizeof(float));
+    cudaMalloc((void**) &gpu_pt_indexes , 2 * MAX_POINTS * sizeof(float));
 
     // Textures - Keep all the gradients in texture space, everytime !
-    cudaMallocArray(&gpu_array_pict_0, &gpu_textr_pict_0.channelDesc, 2 * w, h);
-    cudaMallocArray(&gpu_array_pict_1, &gpu_textr_pict_0.channelDesc, 2 * w, h);
-    cudaMallocArray(&gpu_array_pict_2, &gpu_textr_pict_0.channelDesc, 2 * w, h);
-    cudaMallocArray(&gpu_array_pict_3, &gpu_textr_pict_0.channelDesc, 2 * w, h);
+    cudaMallocArray(&gpu_array_pict_0, &gpu_textr_pict_0.channelDesc, 2 * m_width, m_height);
+    cudaMallocArray(&gpu_array_pict_1, &gpu_textr_pict_0.channelDesc, 2 * m_width, m_height);
+    cudaMallocArray(&gpu_array_pict_2, &gpu_textr_pict_0.channelDesc, 2 * m_width, m_height);
+    cudaMallocArray(&gpu_array_pict_3, &gpu_textr_pict_0.channelDesc, 2 * m_width, m_height);
 
-    cudaMallocArray(&gpu_array_deriv_x_0, &gpu_textr_deriv_x.channelDesc, 2 * w,h); // the array will receive all the pyramid levels !
-    cudaMallocArray(&gpu_array_deriv_y_0, &gpu_textr_deriv_y.channelDesc, 2 * w,h);
-    cudaMallocArray(&gpu_array_deriv_x_1, &gpu_textr_deriv_x.channelDesc, 2 * w,h);
-    cudaMallocArray(&gpu_array_deriv_y_1, &gpu_textr_deriv_y.channelDesc, 2 * w,h);
-    cudaMallocArray(&gpu_array_deriv_x_2, &gpu_textr_deriv_x.channelDesc, 2 * w,h);
-    cudaMallocArray(&gpu_array_deriv_y_2, &gpu_textr_deriv_y.channelDesc, 2 * w,h);
-    cudaMallocArray(&gpu_array_deriv_x_3, &gpu_textr_deriv_x.channelDesc, 2 * w,h);
-    cudaMallocArray(&gpu_array_deriv_y_3, &gpu_textr_deriv_y.channelDesc, 2 * w,h);
+    cudaMallocArray(&gpu_array_deriv_x_0, &gpu_textr_deriv_x.channelDesc, 2 * m_width,m_height); // the array will receive all the pyramid levels !
+    cudaMallocArray(&gpu_array_deriv_y_0, &gpu_textr_deriv_y.channelDesc, 2 * m_width,m_height);
+    cudaMallocArray(&gpu_array_deriv_x_1, &gpu_textr_deriv_x.channelDesc, 2 * m_width,m_height);
+    cudaMallocArray(&gpu_array_deriv_y_1, &gpu_textr_deriv_y.channelDesc, 2 * m_width,m_height);
+    cudaMallocArray(&gpu_array_deriv_x_2, &gpu_textr_deriv_x.channelDesc, 2 * m_width,m_height);
+    cudaMallocArray(&gpu_array_deriv_y_2, &gpu_textr_deriv_y.channelDesc, 2 * m_width,m_height);
+    cudaMallocArray(&gpu_array_deriv_x_3, &gpu_textr_deriv_x.channelDesc, 2 * m_width,m_height);
+    cudaMallocArray(&gpu_array_deriv_y_3, &gpu_textr_deriv_y.channelDesc, 2 * m_width,m_height);
 
     setupTextures();
 
@@ -448,10 +431,6 @@ void cudaLK::initMem4Frame()
     // Check GPU status
     cudaMalloc((void**)&gpu_status, sizeof(char) * MAX_POINTS);
 
-    // Pyramids
-    int _w = w;
-    int _h = h;
-
     // Allocate pinned memory on host
     cudaHostAlloc((void**)&dx1, MAX_POINTS * sizeof(float), 0);
     cudaHostAlloc((void**)&dy1, MAX_POINTS * sizeof(float), 0);
@@ -469,23 +448,8 @@ void cudaLK::initMem4Frame()
 
     checkCUDAError ("Memory Allocation");
 
-    pyr_w[0] = w;
-    pyr_h[0] = h;
-
-    for(int i=1; i < _n_pyramids; ++i) {
-        _w /= 2;
-        _h /= 2;
-        pyr_w[i] = _w;  // Pyramid size
-        pyr_h[i] = _h;
-
-        cudaMalloc((void**)&gpu_img_pyramid_prev1[i], sizeof(float)*_w*_h);
-        cudaMalloc((void**)&gpu_img_pyramid_prev2[i], sizeof(float)*_w*_h);
-        cudaMalloc((void**)&gpu_img_pyramid_cur1[i] , sizeof(float)*_w*_h);
-        cudaMalloc((void**)&gpu_img_pyramid_cur2[i] , sizeof(float)*_w*_h);
-    }
-
     // That's all, folks
-    this->b_mem4_allocated = true;
+    b_mem4_allocated = true;
 
     checkCUDAError ("Allocating 4Frames memory");
     printf("[CucaKLT] : 4Frames memory allocated\n");
@@ -503,7 +467,7 @@ void cudaLK::fillDerivatives(float **pict_pyramid,
                              cudaArray *gpu_array_deriv_y)
 {
     // Compute derivatives & load them into texture units
-    for(int l = _n_pyramids-1; l >= 0; l--) {
+    for(int l = m_nPyramids-1; l >= 0; l--) {
         computeDerivatives(pict_pyramid[l],
                            gpu_deriv_x,       // Buffers
                            gpu_deriv_y,
@@ -522,12 +486,12 @@ void cudaLK::loadPictures( const IplImage *img1,
 {
     // Allocate memory if needed
     if (!b_mem4_allocated) {
-        w = img1->width;
-        h = img1->height;
+        m_width = img1->width;
+        m_height = img1->height;
 
         // Initiate constant memory variables
-        cudaMemcpyToSymbol( LK_width, &w, sizeof(w) );
-        cudaMemcpyToSymbol( LK_height, &h, sizeof(h) );
+        cudaMemcpyToSymbol( LK_width, &m_width, sizeof(m_width) );
+        cudaMemcpyToSymbol( LK_height, &m_height, sizeof(m_height) );
 
         initMem4Frame();
 
@@ -539,22 +503,22 @@ void cudaLK::loadPictures( const IplImage *img1,
         // Init weighting parameters, if needed :
         float temp_weight_array[MAX_WEIGHT_VALUES];
 
-        if (w*h > MAX_WEIGHT_VALUES) {
+        if (m_width*m_height > MAX_WEIGHT_VALUES) {
             // Window is too big.. no weighting for now
             this->b_use_weighted_norm = false;
         }
 
         if ( b_use_weighted_norm )
         {
-            for (int i = -w; i<= w; ++i)
+            for (int i = -m_width; i<= m_width; ++i)
             {
-                for (int j = -h; j<= h; ++j)
+                for (int j = -m_height; j<= m_height; ++j)
                 {
-                    temp_weight_array[i + j*w] = exp (-(i*j)/10.f); // TODO : handle std settings gracefully..
+                    temp_weight_array[i + j*m_width] = exp (-(i*j)/10.f); // TODO : handle std settings gracefully..
                 }
             }
 
-            cudaMemcpyToSymbol (LK_Weight, &temp_weight_array, w*h*sizeof(float), cudaMemcpyHostToDevice);
+            cudaMemcpyToSymbol (LK_Weight, &temp_weight_array, m_width*m_height*sizeof(float), cudaMemcpyHostToDevice);
         }
         checkCUDAError("LoadPictures - set symbols");
     }
@@ -562,24 +526,24 @@ void cudaLK::loadPictures( const IplImage *img1,
     // Swap the pictures & pyramids (current -> back)
     swapPyramids();
 
-    if ( (img1->width != w) || (img1->height !=h) )
+    if ( (img1->width != m_width) || (img1->height !=m_height) )
     {
         printf("CUDA : error - pictures must have the same size\n");
         return;
     }
 
-    int blocksW = w/_n_threads_x + ((w % _n_threads_x)?1:0);
-    int blocksH = h/_n_threads_y + ((h % _n_threads_y)?1:0);
+    int blocksW = m_width/m_nThX + ((m_width % m_nThX)?1:0);
+    int blocksH = m_height/m_nThY + ((m_height % m_nThY)?1:0);
     dim3 blocks(blocksW, blocksH);
-    dim3 threads(_n_threads_x, _n_threads_y);
+    dim3 threads(m_nThX, m_nThY);
 
     // Transfer from host memspace to gpu memspace
     if (b_CvtToGrey) {
-        cudaMemcpy2D (gpu_img_cur1_RGB, w*sizeof(uchar), img1->imageData, img1->widthStep, 3 * img1->width * sizeof(uchar), img1->height, cudaMemcpyHostToDevice );
-        cudaMemcpy2D (gpu_img_cur2_RGB, w*sizeof(uchar), img2->imageData, img2->widthStep, 3 * img2->width * sizeof(uchar), img2->height, cudaMemcpyHostToDevice );
+        cudaMemcpy2D (gpu_img_cur1_RGB, m_width*sizeof(uchar), img1->imageData, img1->widthStep, 3 * img1->width * sizeof(uchar), img1->height, cudaMemcpyHostToDevice );
+        cudaMemcpy2D (gpu_img_cur2_RGB, m_width*sizeof(uchar), img2->imageData, img2->widthStep, 3 * img2->width * sizeof(uchar), img2->height, cudaMemcpyHostToDevice );
     } else {
-        cudaMemcpy2D (gpu_img_cur1_RGB, w*sizeof(uchar), img1->imageData, img1->widthStep, img1->width * sizeof(uchar), img1->height, cudaMemcpyHostToDevice );
-        cudaMemcpy2D (gpu_img_cur2_RGB, w*sizeof(uchar), img2->imageData, img2->widthStep, img2->width * sizeof(uchar), img2->height, cudaMemcpyHostToDevice );
+        cudaMemcpy2D (gpu_img_cur1_RGB, m_width*sizeof(uchar), img1->imageData, img1->widthStep, img1->width * sizeof(uchar), img1->height, cudaMemcpyHostToDevice );
+        cudaMemcpy2D (gpu_img_cur2_RGB, m_width*sizeof(uchar), img2->imageData, img2->widthStep, img2->width * sizeof(uchar), img2->height, cudaMemcpyHostToDevice );
     }
     checkCUDAError("copyToGPU");
 
@@ -592,26 +556,26 @@ void cudaLK::loadPictures( const IplImage *img1,
 
     // Load cudaArray buffer from pyramids
     int pyr_offset = 0;
-    for (int l=0; l<_n_pyramids; ++l) {
+    for (int l=0; l<m_nPyramids; ++l) {
         cudaMemcpy2DToArrayAsync (gpu_array_pict_2,
                                   pyr_offset * sizeof(float),
                                   0,
                                   gpu_img_pyramid_cur2[l],
-                                  sizeof(float)*pyr_w[l],
-                                  sizeof(float)*pyr_w[l],
-                                  pyr_h[l],
+                                  sizeof(float)*m_pyrW[l],
+                                  sizeof(float)*m_pyrW[l],
+                                  m_pyrH[l],
                                   cudaMemcpyDeviceToDevice);
 
         cudaMemcpy2DToArrayAsync(gpu_array_pict_3,
                                  pyr_offset * sizeof(float),
                                  0,
                                  gpu_img_pyramid_cur1[l],
-                                 sizeof(float)*pyr_w[l],
-                                 sizeof(float)*pyr_w[l],
-                                 pyr_h[l],
+                                 sizeof(float)*m_pyrW[l],
+                                 sizeof(float)*m_pyrW[l],
+                                 m_pyrH[l],
                                  cudaMemcpyDeviceToDevice);
 
-        pyr_offset += pyr_w[l];
+        pyr_offset += m_pyrW[l];
     }
 
     // Fill in derivatives, for the two pictures :
@@ -637,16 +601,16 @@ void cudaLK::processTracking( int nPoints )
     int n_pts_ceil = MIN(nPoints, MAX_POINTS);
     int n_pts_sq = (int) round( sqrt(n_pts_ceil)) + 1;
 
-    int blocksW = n_pts_sq/_n_threads_x +
-                  ((n_pts_sq % _n_threads_x)?1:0);
+    int blocksW = n_pts_sq/m_nThX +
+                  ((n_pts_sq % m_nThX)?1:0);
 
-    int blocksH = n_pts_sq/_n_threads_y +
-                  ((n_pts_sq % _n_threads_y )?1:0);
+    int blocksH = n_pts_sq/m_nThY +
+                  ((n_pts_sq % m_nThY )?1:0);
 
     dim3 blocks(blocksW, blocksH);
-    dim3 threads(_n_threads_x, _n_threads_y);
+    dim3 threads(m_nThX, m_nThY);
 
-    for( int l = _n_pyramids-1; l >= 0; l-- )
+    for( int l = m_nPyramids-1; l >= 0; l-- )
     {
         // Set constant parameters
         setSymbols(l);
@@ -681,8 +645,18 @@ void cudaLK::releaseMem() {
     if (this->b_mem4_allocated ) {
         printf("CudaLK : Releasing 4-Frames buffers\n");
 
+        std::vector<PictWorkspace &> buffers { m_imgCur1, m_imgCur2, m_imgPrev1, m_imgPrev2 };
+
+        size_t pictSize = sizeof(char) * m_width * m_height * 3;
+        size_t pictSizef = sizeof(float) * m_width * m_height;
+
+        for (auto w : buffers )
+        {
+            w.free();
+        }
+
         // Release pyramids
-        for(int i=1; i < _n_pyramids; i++) {
+        for(int i=1; i < m_nPyramids; i++) {
             cudaFree(gpu_img_pyramid_prev1[i]);
             cudaFree(gpu_img_pyramid_prev2[i]);
             cudaFree(gpu_img_pyramid_cur1[i]);
@@ -694,24 +668,6 @@ void cudaLK::releaseMem() {
         cudaFree(gpu_img_prev2_RGB);
         cudaFree(gpu_img_cur1_RGB);
         cudaFree(gpu_img_cur2_RGB);
-
-        // Release Pyramids
-        cudaFree(gpu_img_pyramid_prev1[0]);
-        cudaFree(gpu_img_pyramid_prev2[0]);
-        cudaFree(gpu_img_pyramid_cur1[0]);
-        cudaFree(gpu_img_pyramid_cur2[0]);
-
-        // Release smoothed pictures (for pyramids)
-        cudaFree(gpu_smoothed_prev1_x);
-        cudaFree(gpu_smoothed_prev2_x);
-        cudaFree(gpu_smoothed_cur1_x);
-        cudaFree(gpu_smoothed_cur2_x);
-
-        cudaFree(gpu_smoothed_prev1);
-        cudaFree(gpu_smoothed_prev2);
-        cudaFree(gpu_smoothed_cur1);
-        cudaFree(gpu_smoothed_cur2);
-
 
         // Release spatial derivatives
         cudaFree(gpu_deriv_x);
@@ -780,7 +736,7 @@ void cudaLK::releaseMem() {
     // Simple tracking allocated
     if (this->b_mem_allocated) {
         // Free arrays
-        for(int i=0; i < _n_pyramids; i++) {
+        for(int i=0; i < m_nPyramids; i++) {
             cudaFree(gpu_img_pyramid_prev1[i]);
             cudaFree(gpu_img_pyramid_cur1[i]);
         }
@@ -826,13 +782,13 @@ void cudaLK::run4Frames( IplImage  *cur1,
         fprintf(stderr, "run4Frames : error - memory must be allocated and \n .. initial pictures loaded\n");
         exit(EXIT_FAILURE);
     }
-    else if ((width != w) || (height != h))
+    else if ((width != m_width) || (height != m_height))
     {
         fprintf(stderr, "run4Frames : error - Pictures must have the same size\n");
         exit(EXIT_FAILURE);
     }
 
-    int win_size_full = _patch_radius;
+    int win_size_full = m_patchRadius;
     int win_size_short = 2;
 
     // Load current pictures & build pyramids
@@ -957,13 +913,13 @@ void cudaLK::setSymbols(int pyr_level) {
     char initGuess;
 
     for (int i=0; i<pyr_level; ++i) {
-        pyr_deriv_offset += pyr_w[i];
+        pyr_deriv_offset += m_pyrW[i];
     }
     cudaMemcpyToSymbol (LK_width_offset, &pyr_deriv_offset, sizeof(int));
 
-    initGuess = (pyr_level == _n_pyramids-1);
-    cudaMemcpyToSymbol (LK_pyr_w,     &pyr_w[pyr_level],    sizeof(int));
-    cudaMemcpyToSymbol (LK_pyr_h,     &pyr_h[pyr_level],    sizeof(int));
+    initGuess = (pyr_level == m_nPyramids-1);
+    cudaMemcpyToSymbol (LK_pyr_w,     &m_pyrW[pyr_level],    sizeof(int));
+    cudaMemcpyToSymbol (LK_pyr_h,     &m_pyrH[pyr_level],    sizeof(int));
     cudaMemcpyToSymbol (LK_pyr_level, &pyr_level,           sizeof(int));
     cudaMemcpyToSymbol (LK_scaling,   &scaling[pyr_level],  sizeof(float));
     cudaMemcpyToSymbol (LK_init_guess,&initGuess,           sizeof(char));
@@ -1072,16 +1028,16 @@ void cudaLK::swapPyramids () {
                                0, 0,
                                gpu_array_pict_3,
                                0, 0,
-                               2 * w * sizeof(float),
-                               h,
+                               2 * m_width * sizeof(float),
+                               m_height,
                                cudaMemcpyDeviceToDevice);
 
     cudaMemcpy2DArrayToArray  (gpu_array_pict_1,
                                0, 0,
                                gpu_array_pict_2,
                                0, 0,
-                               2 * w * sizeof(float),
-                               h,
+                               2 * m_width * sizeof(float),
+                               m_height,
                                cudaMemcpyDeviceToDevice);
 
 
@@ -1090,136 +1046,31 @@ void cudaLK::swapPyramids () {
                               0, 0,
                               gpu_array_deriv_x_3,
                               0, 0,
-                              2 * w * sizeof(float),
-                              h,
+                              2 * m_width * sizeof(float),
+                              m_height,
                               cudaMemcpyDeviceToDevice);
 
     cudaMemcpy2DArrayToArray (gpu_array_deriv_y_0,
                               0, 0,
                               gpu_array_deriv_y_3,
                               0, 0,
-                              2 * w * sizeof(float),
-                              h,
+                              2 * m_width * sizeof(float),
+                              m_height,
                               cudaMemcpyDeviceToDevice);
 
     cudaMemcpy2DArrayToArray (gpu_array_deriv_x_1,
                               0, 0,
                               gpu_array_deriv_x_2,
                               0, 0,
-                              2 * w * sizeof(float),
-                              h,
+                              2 * m_width * sizeof(float),
+                              m_height,
                               cudaMemcpyDeviceToDevice);
 
     cudaMemcpy2DArrayToArray (gpu_array_deriv_y_1,
                               0, 0,
                               gpu_array_deriv_y_2,
                               0, 0,
-                              2 * w * sizeof(float),
-                              h,
+                              2 * m_width * sizeof(float),
+                              m_height,
                               cudaMemcpyDeviceToDevice);
 }
-/********************************
- * Previous work....
- *********************************/
-
-/*
- *void cudaLK::runTracking(unsigned char *prev,     // Previous picture
-                         unsigned char *cur,      // New picture
-                         int _w,                  // Picture width
-                         int _h,                  // Picture height
-                         float *pt_to_track,      // 2D array of indexes : points to track (floats !)
-                         int n_pts,               // Number of points to track
-                         bool b_CvtToGrey)        // Do the RGB2GRAY conversion or not (single channel picture)
-{
-  //
-  // Sparse optical field calculus : follow points specified in "pt_to_track" array
-  //
-
-  if (! b_mem_allocated) {
-    w = _w;
-    h = _h;
-    initMem();
-  }
-
-  int _n_threads_x = NTHREAD_X;
-  int _n_threads_y = NTHREAD_Y;
-
-  int blocksW = w/_n_threads_x + ((w % _n_threads_x)?1:0);
-  int blocksH = h/_n_threads_y + ((h % _n_threads_y )?1:0);
-  dim3 blocks(blocksW, blocksH);
-  dim3 threads(_n_threads_x, _n_threads_y);
-  int blocks1D = (w*h)/256 + (w*h % 256?1:0); // for greyscale
-  int blocks1D_tracking = n_pts/256 + (n_pts % 256 ? 1:0);
-
-  // Copy image to GPU :
-  if(b_CvtToGrey) {
-    cudaMemcpy(gpu_img_prev_RGB, prev, w*h*3, cudaMemcpyHostToDevice);
-    cudaMemcpy(gpu_img_cur_RGB, cur, w*h*3, cudaMemcpyHostToDevice);
-    checkCUDAError("start");
-  } else {
-    cudaMemcpy(gpu_img_prev_RGB, prev, w*h, cudaMemcpyHostToDevice);
-    cudaMemcpy(gpu_img_cur_RGB, cur, w*h, cudaMemcpyHostToDevice);
-    checkCUDAError("start");
-  }
-
-  // Copy indexes to follow to GPU :
-  cudaMemcpy(gpu_pt_indexes, pt_to_track, 2*n_pts*sizeof(float), cudaMemcpyHostToDevice);
-  checkCUDAError ("Copying indexes to follow");
-
-
-  // Convert pictures (float & grey)
-  if (b_CvtToGrey) {
-    // RGB -> grey
-    convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_prev_RGB, gpu_img_pyramid_prev1[0], w*h);
-    convertRGBToGrey<<<blocks1D, 256>>>(gpu_img_cur_RGB, gpu_img_pyramid_cur1[0], w*h);
-    cudaThreadSynchronize();
-    checkCUDAError("convertRGBToGrey");
-  } else {
-    // Simply convert char to float in kernel
-    convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_prev_RGB, gpu_img_pyramid_prev1[0], w*h);
-    convertGreyToFloat<<<blocks1D, 256>>>(gpu_img_cur_RGB, gpu_img_pyramid_cur1[0], w*h);
-    cudaThreadSynchronize();
-    checkCUDAError("convertToFloat");
-  }
-
-  // Build pyramids
-  for(int i=0; i < _n_pyramids-1; i++) {
-    kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_prev1[i], pyr_w[i], pyr_h[i], gpu_smoothed_prev_x);
-    kernelSmoothX<<<blocks, threads>>>(gpu_img_pyramid_cur1[i], pyr_w[i], pyr_h[i], gpu_smoothed_cur_x);
-    cudaThreadSynchronize();
-    kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_prev_x, pyr_w[i], pyr_h[i], gpu_smoothed_prev);
-    kernelSmoothY<<<blocks, threads>>>(gpu_smoothed_cur_x, pyr_w[i], pyr_h[i], gpu_smoothed_cur);
-    cudaThreadSynchronize();
-
-    pyrDownsample<<<blocks, threads>>>(gpu_smoothed_prev, pyr_w[i], pyr_h[i], gpu_img_pyramid_prev1[i+1], pyr_w[i+1], pyr_h[i+1]);
-    pyrDownsample<<<blocks, threads>>>(gpu_smoothed_cur,  pyr_w[i], pyr_h[i], gpu_img_pyramid_cur1[i+1],  pyr_w[i+1], pyr_h[i+1]);
-    cudaThreadSynchronize();
-
-    checkCUDAError("pyrDownsample here");
-  }
-
-  cudaMemset(gpu_status, 1, sizeof(char) * MAX_POINTS);
-
-  // Do the actual tracking
-  for(int l=_n_pyramids-1; l >= 0; l--) {
-
-    // Copy arrays to texture
-    cudaMemcpy2DToArray(gpu_array_pyramid_prev, 0, 0, gpu_img_pyramid_prev1[l],
-                        sizeof(float)*pyr_w[l], sizeof(float)*pyr_w[l], pyr_h[l], cudaMemcpyDeviceToDevice);
-
-    cudaMemcpy2DToArray(gpu_array_pyramid_cur, 0, 0, gpu_img_pyramid_cur1[l],
-                        sizeof(float)*pyr_w[l], sizeof(float)*pyr_w[l], pyr_h[l], cudaMemcpyDeviceToDevice);
-
-    // Track
-    //    trackPt<<<blocks1D_tracking, 256>>>(gpu_pt_indexes, n_pts, w, h, pyr_w[l], pyr_h[l], scaling[l], l, (l == levels-1), gpu_dx, gpu_dy, 10, .3f, gpu_status);
-    trackPt<<<blocks1D_tracking, 256>>>(gpu_pt_indexes, n_pts, w, h, pyr_w[l], pyr_w[l], scaling[l], l, (l == _n_pyramids-1), gpu_dx, gpu_dy, 10, .3f, gpu_status);
-
-    cudaThreadSynchronize();
-  }
-
-  // Copy back results
-  cudaMemcpy(dx1, gpu_dx, sizeof(float)*n_pts, cudaMemcpyDeviceToHost);
-  cudaMemcpy(dy1, gpu_dy, sizeof(float)*n_pts, cudaMemcpyDeviceToHost);
-  cudaMemcpy(status, gpu_status, sizeof(char)*n_pts, cudaMemcpyDeviceToHost);
-}
-*/

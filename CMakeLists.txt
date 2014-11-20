@@ -6,5 +6,5 @@ find_package(OpenCV REQUIRED)
 # Recurse into the "libCudaLK" and "demo" subdirectories. This does not actually 
 # cause another cmake executable to run. The same process will walk through 
 # the project's entire directory structure.
-add_subdirectory (libCudaLK) 
+add_subdirectory (CudaLK)
 add_subdirectory (Demo) 

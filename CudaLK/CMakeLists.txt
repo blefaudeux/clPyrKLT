@@ -1,5 +1,5 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
-PROJECT(cudaLK)
+PROJECT(CudaLK)
 
 FIND_PACKAGE(CUDA REQUIRED)
 FIND_PACKAGE(OpenCV REQUIRED)
@@ -15,7 +15,7 @@ FILE(GLOB SOURCES "src/*.cu" "src/*.cpp" "src/*.c" "headers/*.h")
 
 LIST(APPEND CMAKE_CXX_FLAGS "-O3 -ffast-math -Wall")
 
-SET(CUDA_NVCC_FLAGS "-arch=sm_30" CACHE STRING "nvcc flags" FORCE)
+SET(CUDA_NVCC_FLAGS  "-arch=sm_30" CACHE STRING "nvcc flags" FORCE) # -Xcompiler "-std=c++0x"
 SET(CUDA_VERBOSE_BUILD ON CACHE BOOL "nvcc verbose" FORCE)
 
 LIST(APPEND CUDA_NVCC_FLAGS --compiler-options -fno-strict-aliasing -lineinfo -use_fast_math -Xptxas -dlcm=cg)

@@ -22,21 +22,17 @@ endif()
 # Get the needed lib and includes:
 find_package(OpenCV REQUIRED)
 
-find_path(CUDALK_INCLUDE_DIR cudaLK/headers/*.h
+find_path(CUDALK_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/../CudaLK/headers/*.h
           HINTS "/usr/local/include"
-          PATH_SUFFIXES libCudaLK)
+          PATH_SUFFIXES CudaLK)
 
-set (CUDALK_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/libCudaLK)
+set(CUDALK_INCLUDE_DIR ${clPyrKLT_INCLUDE_DIR}/CudaLK/headers)
 
-find_library(CUDALK_LIBRARY NAMES CUDALKd libCUDALKd
-             HINTS "/usr/local/lib")
+find_library(CUDALK_LIBRARY NAMES CUDALKd libCUDALKd HINTS "/usr/local/lib")
 
 # Define the included directories
 include_directories(${PROJECT_SOURCE_DIR})
-include_directories(${Boost_INCLUDE_DIRS})
 include_directories(${OPENCV_INCLUDE_DIRS})
-
-message("\nCudaLK lib :\n ${PTAM_LIBRARY}\n ${PTAM_INCLUDE_DIR}\n")
 
 # Set debug or release configurations
 if( CMAKE_BUILD_TYPE MATCHES "[Dd][Ee][Bb][Uu][Gg]" )
@@ -59,8 +55,6 @@ endif()
 set(LINK_LIBS ${OPENCV_LIBRARIES})
 
 # Build the executable
-message("Source files : ${SRC}")
-
 add_executable(demoCudaLK ${SRC})
 
 if( CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" )

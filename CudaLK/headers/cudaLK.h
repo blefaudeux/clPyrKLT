@@ -50,6 +50,72 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define MAX(a,b) ((a)>(b)) ? (a) : (b)
 #endif
 
+struct PictWorkspace
+{
+        void allocate( int const width, int const height, int const nPyramids )
+        {
+            m_width = width;
+            m_height = height;
+            size_t  pictSize = width * height;
+
+            // Allocate picture buffers
+            cudaMalloc((void**)& d_img, pictSize * 3 * sizeof(char) );
+
+            // Allocate pyramids
+            cudaMalloc((void**)&d_pyramid[0], pictSize * sizeof(float) );
+
+            int pyrW[LEVELS], pyrH[LEVELS];
+
+            pyrW[0] = width;
+            pyrH[0] = height;
+            int _w = m_width;
+            int _h = m_height;
+
+            for(int i=1; i < nPyramids; ++i) {
+                _w /= 2;
+                _h /= 2;
+                pyrW[i] = _w;  // Pyramid size
+                pyrH[i] = _h;
+
+                cudaMalloc((void**)&d_pyramid[i], sizeof(float)*_w*_h);
+            }
+
+            // Allocate smoothed pictures (for pyramid building)
+            cudaMalloc((void**)&d_smoothX, pictSize * sizeof(float));
+            cudaMalloc((void**)&d_smoothY, pictSize * sizeof(float));
+
+            // Allocate spatial derivatives
+            cudaMalloc((void**)&d_derivX, pictSize * sizeof(float));
+            cudaMalloc((void**)&d_derivY, pictSize * sizeof(float));
+        }
+
+        void free()
+        {
+            cudaFree( d_img );
+            for (int i=0; i<LEVELS; ++i)
+            {
+                cudaFree( d_pyramid[i] );
+            }
+
+            cudaFree( d_smoothX );
+            cudaFree( d_smoothY );
+
+            cudaFree( d_derivX );
+            cudaFree( d_derivY );
+        }
+
+    int m_width, m_height;
+
+    unsigned char * d_img;
+    float * d_pyramid[LEVELS];
+    float * d_sobel;
+    float * d_smoothX;
+    float * d_smoothY;
+
+    float * d_derivX;
+    float * d_derivY;
+};
+
 class cudaLK
 {
     public:
@@ -77,18 +143,18 @@ class cudaLK
         void exportDebug(IplImage *outPict);
 
         void sobelFiltering(const float *pict_in,
-                            const int w,
-                            const int h,
+                            const int m_width,
+                            const int m_height,
                             float *pict_out);
 
         void sobelFilteringX(const float *pict_in,
-                             const int w,
-                             const int h,
+                             const int m_width,
+                             const int m_height,
                              float *pict_out);
 
         void sobelFilteringY(const float *pict_in,
-                             const int w,
-                             const int h,
+                             const int m_width,
+                             const int m_height,
                              float *pict_out);
 
         void dummyCall();
@@ -132,15 +198,20 @@ class cudaLK
     private:
         bool b_use_weighted_norm;
 
-        int w, h;
-        int _n_pyramids, _patch_radius, _max_points;
-        int pyr_w[LEVELS], pyr_h[LEVELS];
-        int _n_threads_x, _n_threads_y;
+        int m_width, m_height;
+        int m_nPyramids, m_patchRadius, m_maxPoints;
+        int m_pyrW[LEVELS], m_pyrH[LEVELS];
+        int m_nThX, m_nThY;
 
         // TODO : cleanup using structures !
         //
         // |
         // V
+        PictWorkspace m_imgCur1;
+        PictWorkspace m_imgCur2;
+        PictWorkspace m_imgPrev1;
+        PictWorkspace m_imgPrev2;
+
         unsigned char *gpu_img_prev_RGB;
         unsigned char *gpu_img_cur_RGB;
 
@@ -162,9 +233,6 @@ class cudaLK
         float *gpu_sobel_cur1;
         float *gpu_sobel_cur2;
 
-        float *buff1;
-        float *buff2;
-
         float *gpu_smoothed_prev1_x;
         float *gpu_smoothed_prev2_x;
         float *gpu_smoothed_cur1_x;
@@ -175,6 +243,9 @@ class cudaLK
         float *gpu_smoothed_cur1;
         float *gpu_smoothed_cur2;
 
+        float *buff1;
+        float *buff2;
+
         float *gpu_deriv_x;
         float *gpu_deriv_y;
 
@@ -182,7 +253,6 @@ class cudaLK
         float *gpu_neighbourhood_Iyy;
         float *gpu_neighbourhood_Ixy;
         float *gpu_neighbourhood_Ixx;
-
 
 
         // Texture buffers
